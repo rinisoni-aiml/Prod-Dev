@@ -1,9 +1,39 @@
-# PulseIQ - React Frontend
+# PulseIQ - Supply Chain Management Platform
 
-A modern React application for supply chain management and demand forecasting, built with Vite, React Router, and Tailwind CSS.
+A modern full-stack application for supply chain management and demand forecasting, built with React, FastAPI, and Supabase.
+
+## 🚀 Quick Deploy
+
+**🎉 Your app is deployment-ready!**
+
+**Start here:** [START_HERE.md](./START_HERE.md) - Choose your deployment path
+
+**Quick commands:**
+```bash
+# Deploy frontend (5 minutes)
+npm run deploy
+
+# Then follow guides for backend + database
+```
+
+**Time to full deployment**: 30-45 minutes
+
+**All guides available:**
+- [Quick Deploy](./QUICK_DEPLOY.md) - Fast commands
+- [Complete Guide](./VERCEL_DEPLOYMENT_GUIDE.md) - Step-by-step
+- [Checklist](./DEPLOYMENT_CHECKLIST.md) - Track progress
+- [Summary](./DEPLOYMENT_COMPLETE.md) - What's included
+
+## 📚 Documentation
+
+- [Vercel Deployment Guide](./VERCEL_DEPLOYMENT_GUIDE.md) - Quick start for deploying to Vercel
+- [Deployment Plan](./DEPLOYMENT_PLAN.md) - Complete deployment strategy
+- [Backend Implementation](./BACKEND_IMPLEMENTATION.md) - Full FastAPI backend code
+- [Backend Setup](./BACKEND_SETUP.md) - Backend development guide
 
 ## Tech Stack
 
+### Frontend
 - **React 18** - UI library
 - **Vite** - Build tool and dev server
 - **React Router v6** - Client-side routing
@@ -15,6 +45,13 @@ A modern React application for supply chain management and demand forecasting, b
 - **Axios** - HTTP client
 - **Framer Motion** - Animations
 - **Recharts** - Data visualization
+
+### Backend
+- **FastAPI** - Python web framework
+- **Supabase** - PostgreSQL database + Auth
+- **Python 3.9+** - Runtime
+- **JWT** - Authentication
+- **OpenAI/Anthropic** - AI features (optional)
 
 ## Prerequisites
 
