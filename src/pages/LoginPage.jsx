@@ -5,6 +5,7 @@ import { Eye, EyeOff, Mail, Lock, ArrowRight } from 'lucide-react';
 import Logo from '@/components/Logo';
 import ThemeToggle from '@/components/ThemeToggle';
 import { useAuthStore } from '@/stores/authStore';
+import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 
 const LoginPage = () => {
@@ -13,30 +14,36 @@ const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { setUser, setProfile } = useAuthStore();
+  const { setUser, fetchProfile } = useAuthStore();
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!email || !password) {
-      toast.error('Please fill in all fields');
-      return;
-    }
+    if (!email || !password) { toast.error('Please fill in all fields'); return; }
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1000));
-      const demoUser = { id: 'demo-user', email };
-      const demoProfile = {
-        id: 'demo-user', full_name: 'Demo User', company_name: '',
-        industry: '', role: '', plan: 'free', theme_preference: 'dark',
-        onboarding_completed: false, created_at: new Date().toISOString(),
-      };
-      localStorage.setItem('pulseiq-token', 'demo-token');
-      setUser(demoUser);
-      setProfile(demoProfile);
-      toast.success('Welcome! Let\'s set up your workspace.');
-      navigate('/onboarding');
-    } catch {
-      toast.error('Invalid credentials');
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+
+      setUser(data.user);
+
+      // Log the login event
+      await supabase.from('user_logins').insert({
+        email: data.user.email,
+        login_type: 'login',
+        logged_at: new Date().toISOString(),
+      });
+
+      // Fetch profile to check if onboarding is done
+      const profile = await fetchProfile(data.user.id);
+      if (profile?.onboarding_completed) {
+        toast.success('Welcome back!');
+        navigate('/dashboard');
+      } else {
+        toast.success('Welcome! Let\'s finish setting up your workspace.');
+        navigate('/onboarding');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Invalid credentials');
     } finally {
       setLoading(false);
     }

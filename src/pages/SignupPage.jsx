@@ -5,6 +5,7 @@ import { Eye, EyeOff, Mail, Lock, User, ArrowRight } from 'lucide-react';
 import Logo from '@/components/Logo';
 import ThemeToggle from '@/components/ThemeToggle';
 import { useAuthStore } from '@/stores/authStore';
+import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 
 const SignupPage = () => {
@@ -14,34 +15,34 @@ const SignupPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { setUser, setProfile } = useAuthStore();
+  const { setUser } = useAuthStore();
 
   const handleSignup = async (e) => {
     e.preventDefault();
-    if (!name || !email || !password) {
-      toast.error('Please fill in all fields');
-      return;
-    }
-    if (password.length < 6) {
-      toast.error('Password must be at least 6 characters');
-      return;
-    }
+    if (!name || !email || !password) { toast.error('Please fill in all fields'); return; }
+    if (password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1000));
-      const demoUser = { id: 'demo-user', email };
-      const demoProfile = {
-        id: 'demo-user', full_name: name, company_name: '',
-        industry: '', role: 'admin', plan: 'free', theme_preference: 'dark',
-        onboarding_completed: false, created_at: new Date().toISOString(),
-      };
-      localStorage.setItem('pulseiq-token', 'demo-token');
-      setUser(demoUser);
-      setProfile(demoProfile);
-      toast.success('Account created!');
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: name } },
+      });
+      if (error) throw error;
+
+      setUser(data.user);
+
+      // Log the signup event
+      await supabase.from('user_logins').insert({
+        email,
+        login_type: 'signup',
+        logged_at: new Date().toISOString(),
+      });
+
+      toast.success('Account created! Let\'s set up your workspace.');
       navigate('/onboarding');
-    } catch {
-      toast.error('Signup failed');
+    } catch (err) {
+      toast.error(err.message || 'Signup failed');
     } finally {
       setLoading(false);
     }

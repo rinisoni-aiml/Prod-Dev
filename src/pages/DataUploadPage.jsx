@@ -1,17 +1,31 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Upload, FileText, Trash2, Eye, RefreshCw, Plus } from 'lucide-react';
+import { Upload, FileText, Trash2, Download, RefreshCw, Plus, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '@/stores/authStore';
+import { uploadDataFile, fetchDataFiles, deleteDataFile, getFileDownloadUrl } from '@/lib/dataFiles';
 import SchemaMapping, { DEFAULT_PLATFORM_FIELDS, autoMapHeaders, parseCSVPreview } from '@/components/data/SchemaMapping';
 
 const DataUploadPage = () => {
+  const { user } = useAuthStore();
   const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [savedFiles, setSavedFiles] = useState([]);
+  const [loadingSaved, setLoadingSaved] = useState(true);
   const [dragOver, setDragOver] = useState(false);
 
-  const existingSources = [
-    { id: '1', file_name: 'sales_data_q1.csv', file_type: 'csv', row_count: 2847, status: 'ready', created_at: '2025-03-01T10:00:00Z' },
-    { id: '2', file_name: 'inventory_snapshot.xlsx', file_type: 'xlsx', row_count: 1234, status: 'ready', created_at: '2025-03-05T14:30:00Z' },
-  ];
+  const loadSavedFiles = useCallback(async () => {
+    if (!user) return;
+    try {
+      const files = await fetchDataFiles(user.id);
+      setSavedFiles(files);
+    } catch {
+      toast.error('Failed to load data sources');
+    } finally {
+      setLoadingSaved(false);
+    }
+  }, [user]);
+
+  useEffect(() => { loadSavedFiles(); }, [loadSavedFiles]);
 
   const processFile = useCallback(async (file) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -25,30 +39,20 @@ const DataUploadPage = () => {
     const files = Array.from(fileList).filter(f =>
       f.name.endsWith('.csv') || f.name.endsWith('.xlsx') || f.name.endsWith('.xls')
     );
-    if (files.length === 0) {
-      toast.error('Please upload CSV or Excel files');
-      return;
-    }
+    if (files.length === 0) { toast.error('Please upload CSV or Excel files'); return; }
     const processed = await Promise.all(files.map(processFile));
     setUploadedFiles(prev => [...prev, ...processed]);
     toast.success(`${files.length} file(s) added`);
   }, [processFile]);
 
   const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    setDragOver(false);
-    handleFilesAdded(e.dataTransfer.files);
+    e.preventDefault(); setDragOver(false); handleFilesAdded(e.dataTransfer.files);
   }, [handleFilesAdded]);
 
   const handleBrowse = () => {
     const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.csv,.xlsx,.xls';
-    input.multiple = true;
-    input.onchange = (e) => {
-      const files = e.target.files;
-      if (files) handleFilesAdded(files);
-    };
+    input.type = 'file'; input.accept = '.csv,.xlsx,.xls'; input.multiple = true;
+    input.onchange = (e) => { if (e.target.files) handleFilesAdded(e.target.files); };
     input.click();
   };
 
@@ -57,10 +61,19 @@ const DataUploadPage = () => {
   };
 
   const handleProcess = async (fileId) => {
+    const fileEntry = uploadedFiles.find(f => f.id === fileId);
+    if (!fileEntry || !user) return;
+
     setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'processing' } : f));
-    await new Promise(r => setTimeout(r, 2000));
-    setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'ready' } : f));
-    toast.success('Data imported successfully!');
+    try {
+      await uploadDataFile(user.id, fileEntry.file, fileEntry.mapping, fileEntry.previewRows.length);
+      setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+      await loadSavedFiles();
+      toast.success('File uploaded and saved!');
+    } catch (err) {
+      setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'mapping' } : f));
+      toast.error(err.message || 'Upload failed');
+    }
   };
 
   const handleResetMapping = (fileId) => {
@@ -72,6 +85,32 @@ const DataUploadPage = () => {
 
   const handleRemoveFile = (fileId) => {
     setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+  };
+
+  const handleDelete = async (file) => {
+    try {
+      await deleteDataFile(file.id, file.storage_path);
+      setSavedFiles(prev => prev.filter(f => f.id !== file.id));
+      toast.success('File deleted');
+    } catch {
+      toast.error('Failed to delete file');
+    }
+  };
+
+  const handleDownload = async (file) => {
+    try {
+      const url = await getFileDownloadUrl(file.storage_path);
+      window.open(url, '_blank');
+    } catch {
+      toast.error('Failed to get download link');
+    }
+  };
+
+  const formatSize = (bytes) => {
+    if (!bytes) return '—';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   return (
@@ -120,54 +159,86 @@ const DataUploadPage = () => {
       )}
 
       <div className="glass-card rounded-xl">
-        <div className="p-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-foreground">Uploaded Data Sources</h3>
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">
+            Uploaded Data Sources
+            {savedFiles.length > 0 && (
+              <span className="ml-2 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
+                {savedFiles.length}
+              </span>
+            )}
+          </h3>
+          <button onClick={loadSavedFiles} className="h-7 w-7 rounded-lg flex items-center justify-center hover:bg-muted transition-colors" title="Refresh">
+            <RefreshCw className="h-3.5 w-3.5 text-foreground-secondary" />
+          </button>
         </div>
-        <div className="divide-y divide-border">
-          {existingSources.map((source) => (
-            <div key={source.id} className="p-4 flex items-center justify-between hover:bg-background-elevated/30 transition-colors">
-              <div className="flex items-center gap-4">
-                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <FileText className="h-5 w-5 text-primary" />
+
+        {loadingSaved ? (
+          <div className="p-8 flex items-center justify-center">
+            <Loader2 className="h-5 w-5 text-primary animate-spin" />
+          </div>
+        ) : savedFiles.length === 0 ? (
+          <div className="p-8 text-center text-sm text-foreground-secondary">
+            No data sources yet. Upload your first file above.
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {savedFiles.map((file) => (
+              <div key={file.id} className="p-4 flex items-center justify-between hover:bg-background-elevated/30 transition-colors">
+                <div className="flex items-center gap-4">
+                  <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <FileText className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{file.file_name}</p>
+                    <p className="text-xs text-foreground-secondary">
+                      {file.row_count ? `${file.row_count.toLocaleString()} rows · ` : ''}
+                      {file.file_type?.toUpperCase()} · {formatSize(file.file_size)} · Uploaded {new Date(file.uploaded_at).toLocaleDateString()}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-foreground">{source.file_name}</p>
-                  <p className="text-xs text-foreground-secondary">
-                    {source.row_count.toLocaleString()} rows · {source.file_type.toUpperCase()} · Uploaded {new Date(source.created_at).toLocaleDateString()}
-                  </p>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-success/10 text-success">{file.status}</span>
+                  <button
+                    onClick={() => handleDownload(file)}
+                    className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors"
+                    title="Download"
+                  >
+                    <Download className="h-4 w-4 text-foreground-secondary" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(file)}
+                    className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 transition-colors"
+                    title="Delete"
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-1 rounded-full text-xs font-medium bg-success/10 text-success">{source.status}</span>
-                <button className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors" title="Preview">
-                  <Eye className="h-4 w-4 text-foreground-secondary" />
-                </button>
-                <button className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors" title="Re-upload">
-                  <RefreshCw className="h-4 w-4 text-foreground-secondary" />
-                </button>
-                <button className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-destructive/10 transition-colors" title="Delete">
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="glass-card p-5 rounded-xl">
-        <h3 className="text-sm font-semibold text-foreground mb-4">Data Health</h3>
-        <div className="grid md:grid-cols-4 gap-4">
-          {[
-            { label: 'Completeness', value: '94.2%', color: 'text-success' },
-            { label: 'Missing Values', value: '237', color: 'text-warning' },
-            { label: 'Date Range', value: '30 days', color: 'text-primary' },
-            { label: 'Duplicates', value: '12', color: 'text-foreground-secondary' },
-          ].map((item) => (
-            <div key={item.label} className="text-center">
-              <p className={`text-xl font-bold ${item.color}`}>{item.value}</p>
-              <p className="text-xs text-foreground-secondary mt-1">{item.label}</p>
-            </div>
-          ))}
+        <h3 className="text-sm font-semibold text-foreground mb-4">Data Summary</h3>
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="text-center">
+            <p className="text-xl font-bold text-primary">{savedFiles.length}</p>
+            <p className="text-xs text-foreground-secondary mt-1">Total Files</p>
+          </div>
+          <div className="text-center">
+            <p className="text-xl font-bold text-success">
+              {savedFiles.reduce((sum, f) => sum + (f.row_count || 0), 0).toLocaleString()}
+            </p>
+            <p className="text-xs text-foreground-secondary mt-1">Total Rows</p>
+          </div>
+          <div className="text-center">
+            <p className="text-xl font-bold text-foreground-secondary">
+              {formatSize(savedFiles.reduce((sum, f) => sum + (f.file_size || 0), 0))}
+            </p>
+            <p className="text-xs text-foreground-secondary mt-1">Total Size</p>
+          </div>
         </div>
       </div>
     </div>
