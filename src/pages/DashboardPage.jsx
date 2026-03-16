@@ -3,17 +3,24 @@ import { Package, AlertTriangle, Target, Activity, TrendingUp, ArrowRight, X, Sp
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { useInView } from 'react-intersection-observer';
 import CountUp from 'react-countup';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { mockKPIs, mockDemandTrend, mockTopSKUs, mockInventorySnapshot, mockAlerts, mockAIInsights } from '@/lib/mockData';
 import { useChatStore } from '@/stores/chatStore';
+import { fetchDataFiles } from '@/lib/dataFiles';
 
 const iconMap = { Package, AlertTriangle, Target, Activity };
 
 const DashboardPage = () => {
-  const { profile } = useAuthStore();
+  const { profile, user } = useAuthStore();
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const { openChat } = useChatStore();
+  const [fileCount, setFileCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchDataFiles(user.id).then((files) => setFileCount(files.length)).catch(() => {});
+  }, [user]);
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 py-6 space-y-6">
@@ -22,7 +29,9 @@ const DashboardPage = () => {
           className="glass-card p-5 rounded-xl flex items-center justify-between">
           <div>
             <h2 className="text-lg font-bold text-foreground">Welcome, {profile?.full_name || 'User'}! Your FMCG workspace is ready. 🎉</h2>
-            <p className="text-sm text-foreground-secondary mt-1">{profile?.company_name || 'Company'} · 1 data source · Last upload: just now</p>
+            <p className="text-sm text-foreground-secondary mt-1">
+              {profile?.company_name || 'Company'} · {fileCount} data source{fileCount !== 1 ? 's' : ''} uploaded
+            </p>
           </div>
           <button onClick={() => setBannerDismissed(true)} className="text-foreground-secondary hover:text-foreground"><X className="h-5 w-5" /></button>
         </motion.div>
