@@ -1,11 +1,46 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { BarChart, Bar, PieChart, Pie, Cell, RadialBarChart, RadialBar, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { Package, Warehouse, AlertTriangle, Sparkles } from 'lucide-react';
-import { mockWarehouses, mockReorderQueue, mockABCAnalysis, mockInventorySnapshot } from '@/lib/mockData';
+import { Warehouse } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { useAuthStore } from '@/stores/authStore';
+import { inventoryApi } from '@/lib/api';
+
+const SNAPSHOT_COLORS = {
+  Optimal: 'hsl(160, 84%, 39%)',
+  'Low Stock': 'hsl(38, 92%, 50%)',
+  Stockout: 'hsl(0, 84%, 60%)',
+  Overstock: 'hsl(217, 91%, 60%)',
+};
 
 const InventoryPage = () => {
+  const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('overview');
+  const enabled = !!user;
+
+  const { data: overview } = useQuery({
+    queryKey: ['inventory-overview'],
+    queryFn: () => inventoryApi.getOverview().then((r) => r.data),
+    enabled,
+  });
+
+  const { data: warehouses = [] } = useQuery({
+    queryKey: ['inventory-warehouses'],
+    queryFn: () => inventoryApi.getWarehouses().then((r) => r.data),
+    enabled,
+  });
+
+  const { data: reorderQueue = [] } = useQuery({
+    queryKey: ['inventory-reorder'],
+    queryFn: () => inventoryApi.getReorderQueue().then((r) => r.data),
+    enabled,
+  });
+
+  const { data: abcAnalysis = [] } = useQuery({
+    queryKey: ['inventory-abc'],
+    queryFn: () => inventoryApi.getABCAnalysis().then((r) => r.data),
+    enabled,
+  });
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
@@ -34,23 +69,31 @@ const InventoryPage = () => {
         ))}
       </div>
 
-      {activeTab === 'overview' && <OverviewTab />}
-      {activeTab === 'warehouses' && <WarehouseTab />}
-      {activeTab === 'reorder' && <ReorderTab />}
-      {activeTab === 'abc' && <ABCTab />}
+      {activeTab === 'overview' && <OverviewTab overview={overview} />}
+      {activeTab === 'warehouses' && <WarehouseTab warehouses={warehouses} />}
+      {activeTab === 'reorder' && <ReorderTab reorderQueue={reorderQueue} />}
+      {activeTab === 'abc' && <ABCTab abcAnalysis={abcAnalysis} />}
     </div>
   );
 };
 
-function OverviewTab() {
+function OverviewTab({ overview }) {
   const statusCards = [
-    { label: 'Optimal Stock', value: 156, color: 'text-success', bg: 'bg-success/10' },
-    { label: 'Low Stock', value: 52, color: 'text-warning', bg: 'bg-warning/10' },
-    { label: 'Stockout', value: 18, color: 'text-destructive', bg: 'bg-destructive/10' },
-    { label: 'Overstock', value: 21, color: 'text-primary', bg: 'bg-primary/10' },
+    { label: 'Optimal Stock', value: overview?.optimal ?? 0, color: 'text-success', bg: 'bg-success/10' },
+    { label: 'Low Stock', value: overview?.low_stock ?? 0, color: 'text-warning', bg: 'bg-warning/10' },
+    { label: 'Stockout', value: overview?.stockout ?? 0, color: 'text-destructive', bg: 'bg-destructive/10' },
+    { label: 'Overstock', value: overview?.overstock ?? 0, color: 'text-primary', bg: 'bg-primary/10' },
   ];
 
-  const healthData = [{ name: 'Health', value: 74, fill: 'hsl(217, 91%, 60%)' }];
+  const healthScore = overview?.health_score ?? 0;
+  const healthData = [{ name: 'Health', value: healthScore, fill: 'hsl(217, 91%, 60%)' }];
+
+  const snapshotData = [
+    { name: 'Optimal', value: overview?.optimal ?? 0 },
+    { name: 'Low Stock', value: overview?.low_stock ?? 0 },
+    { name: 'Stockout', value: overview?.stockout ?? 0 },
+    { name: 'Overstock', value: overview?.overstock ?? 0 },
+  ].map((s) => ({ ...s, color: SNAPSHOT_COLORS[s.name] }));
 
   return (
     <div className="space-y-6">
@@ -72,25 +115,43 @@ function OverviewTab() {
               <RadialBar dataKey="value" cornerRadius={10} fill="hsl(217, 91%, 60%)" background={{ fill: 'hsl(var(--muted))' }} />
             </RadialBarChart>
           </ResponsiveContainer>
-          <p className="text-center text-3xl font-bold text-foreground -mt-16">74<span className="text-lg text-foreground-secondary">/100</span></p>
+          <p className="text-center text-3xl font-bold text-foreground -mt-16">
+            {healthScore}<span className="text-lg text-foreground-secondary">/100</span>
+          </p>
         </div>
         <div className="glass-card p-5 rounded-xl">
           <h3 className="text-sm font-semibold text-foreground mb-4">Distribution by Status</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie data={mockInventorySnapshot} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} paddingAngle={3}>
-                {mockInventorySnapshot.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-              </Pie>
-              <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
-            </PieChart>
-          </ResponsiveContainer>
+          {snapshotData.some((s) => s.value > 0) ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={snapshotData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} paddingAngle={3}>
+                  {snapshotData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                </Pie>
+                <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[200px] flex items-center justify-center">
+              <p className="text-sm text-foreground-secondary">No inventory data yet</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function WarehouseTab() {
+function WarehouseTab({ warehouses }) {
+  if (warehouses.length === 0) {
+    return (
+      <div className="glass-card p-12 rounded-xl text-center">
+        <Warehouse className="h-10 w-10 text-foreground-secondary mx-auto mb-4" />
+        <p className="text-lg font-semibold text-foreground mb-2">No warehouses yet</p>
+        <p className="text-sm text-foreground-secondary">Warehouses will appear here once you upload inventory data.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="glass-card rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
@@ -103,7 +164,7 @@ function WarehouseTab() {
             </tr>
           </thead>
           <tbody>
-            {mockWarehouses.map((wh) => (
+            {warehouses.map((wh) => (
               <tr key={wh.id} className="border-b border-border hover:bg-background-elevated/30 transition-colors cursor-pointer">
                 <td className="px-4 py-3 font-medium text-foreground flex items-center gap-2">
                   <Warehouse className="h-4 w-4 text-foreground-secondary" /> {wh.name}
@@ -132,7 +193,16 @@ function WarehouseTab() {
   );
 }
 
-function ReorderTab() {
+function ReorderTab({ reorderQueue }) {
+  if (reorderQueue.length === 0) {
+    return (
+      <div className="glass-card p-12 rounded-xl text-center">
+        <p className="text-lg font-semibold text-foreground mb-2">Reorder queue is empty</p>
+        <p className="text-sm text-foreground-secondary">Items needing reorder will appear here automatically.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="glass-card rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
@@ -145,13 +215,13 @@ function ReorderTab() {
             </tr>
           </thead>
           <tbody>
-            {mockReorderQueue.map((item) => (
+            {reorderQueue.map((item) => (
               <tr key={item.sku} className="border-b border-border hover:bg-background-elevated/30 transition-colors">
                 <td className="px-4 py-3 font-mono text-xs text-foreground-secondary">{item.sku}</td>
                 <td className="px-4 py-3 font-medium text-foreground">{item.product}</td>
                 <td className="px-4 py-3 text-foreground-secondary">{item.current_stock}</td>
                 <td className="px-4 py-3 text-foreground-secondary">{item.daily_avg}/day</td>
-                <td className="px-4 py-3"><span className={item.days_left < 3 ? 'text-destructive font-bold' : 'text-foreground-secondary'}>{item.days_left.toFixed(1)}d</span></td>
+                <td className="px-4 py-3"><span className={item.days_left < 3 ? 'text-destructive font-bold' : 'text-foreground-secondary'}>{Number(item.days_left).toFixed(1)}d</span></td>
                 <td className="px-4 py-3">
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                     item.urgency === 'critical' ? 'bg-destructive/10 text-destructive' : item.urgency === 'high' ? 'bg-warning/10 text-warning' : 'bg-primary/10 text-primary'
@@ -170,12 +240,22 @@ function ReorderTab() {
   );
 }
 
-function ABCTab() {
+function ABCTab({ abcAnalysis }) {
   const colors = ['hsl(217, 91%, 60%)', 'hsl(187, 96%, 42%)', 'hsl(var(--muted-foreground))'];
+
+  if (abcAnalysis.length === 0) {
+    return (
+      <div className="glass-card p-12 rounded-xl text-center">
+        <p className="text-lg font-semibold text-foreground mb-2">No ABC data yet</p>
+        <p className="text-sm text-foreground-secondary">Upload inventory data with SKU revenue info to run ABC analysis.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="grid md:grid-cols-3 gap-4">
-        {mockABCAnalysis.map((cat, i) => (
+        {abcAnalysis.map((cat, i) => (
           <div key={cat.category} className="glass-card p-5 rounded-xl">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl font-bold text-foreground">Category {cat.category}</span>
@@ -189,13 +269,13 @@ function ABCTab() {
       <div className="glass-card p-5 rounded-xl">
         <h3 className="text-sm font-semibold text-foreground mb-4">Revenue Distribution by Category</h3>
         <ResponsiveContainer width="100%" height={250}>
-          <BarChart data={mockABCAnalysis}>
+          <BarChart data={abcAnalysis}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
             <XAxis dataKey="category" stroke="hsl(var(--foreground-secondary))" tick={{ fontSize: 12 }} />
             <YAxis stroke="hsl(var(--foreground-secondary))" tick={{ fontSize: 10 }} />
             <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
             <Bar dataKey="revenue_pct" radius={[6, 6, 0, 0]}>
-              {mockABCAnalysis.map((_, i) => <Cell key={i} fill={colors[i]} />)}
+              {abcAnalysis.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>

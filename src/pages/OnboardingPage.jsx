@@ -63,11 +63,9 @@ const OnboardingPage = () => {
     setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, mapping } : f));
   };
 
-  const handleProcessFile = async (fileId) => {
-    setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'processing' } : f));
-    await new Promise(r => setTimeout(r, 1500));
+  const handleProcessFile = (fileId) => {
     setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'ready' } : f));
-    toast.success('File processed!');
+    toast.success('File ready!');
   };
 
   const handleResetMapping = (fileId) => {

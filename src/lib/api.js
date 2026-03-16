@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { supabase } from './supabase';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -7,10 +8,13 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('pulseiq-token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+// Attach the Supabase access token to every request
+api.interceptors.request.use(async (config) => {
+  if (supabase) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      config.headers.Authorization = `Bearer ${session.access_token}`;
+    }
   }
   return config;
 });
@@ -19,7 +23,6 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('pulseiq-token');
       window.location.href = '/login';
     }
     return Promise.reject(err);
@@ -49,7 +52,6 @@ export const dashboardApi = {
   getDemandTrend: (params) => api.get('/api/dashboard/demand-trend', { params }),
   getTopSKUs: () => api.get('/api/dashboard/top-skus'),
   getInventorySnapshot: () => api.get('/api/dashboard/inventory-snapshot'),
-  getAlerts: (params) => api.get('/api/alerts', { params }),
 };
 
 // Forecasting
@@ -88,5 +90,5 @@ export const aiApi = {
   chat: (sessionId, message) => api.post('/api/ai/chat', { session_id: sessionId, message }),
   getSessions: () => api.get('/api/ai/sessions'),
   createSession: () => api.post('/api/ai/sessions'),
-  getRecommendations: (context) => api.post('/api/ai/recommendations', { context }),
+  getRecommendations: (context) => api.post('/api/ai/recommendations', context),
 };
