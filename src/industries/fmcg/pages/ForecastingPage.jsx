@@ -4,11 +4,14 @@ import {
   ComposedChart, Line, Area, ResponsiveContainer, XAxis, YAxis,
   CartesianGrid, Tooltip, BarChart, Bar, Cell, ReferenceLine,
 } from 'recharts';
-import { Sparkles, ArrowRight, Upload, Loader2, TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw } from 'lucide-react';
+import {
+  Sparkles, ArrowRight, Upload, Loader2,
+  TrendingUp, RefreshCw,
+} from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
-import { fetchDataFiles, getFileDownloadUrl } from '@/lib/dataFiles';
-import { extractTimeSeries, runForecast, aggregateSeries, runMultiSKUForecast } from '@/lib/forecast';
+import { fetchDataFiles } from '@/lib/dataFiles';
+import { forecastApi } from '@/lib/api';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
@@ -32,9 +35,10 @@ const ForecastingPage = () => {
   const [selectedSKU, setSelectedSKU] = useState('All Products');
 
   const [skuList, setSkuList] = useState(['All Products']);
-  const [allResults, setAllResults] = useState(null); // { [sku]: forecastResult }
-  const [chartData, setChartData] = useState([]); // combined historical + forecast for chart
+  const [allResults, setAllResults] = useState(null); // { [sku]: { historical, forecast, metrics } }
+  const [chartData, setChartData] = useState([]);
   const [metrics, setMetrics] = useState(null);
+  const [modelType, setModelType] = useState(null);
 
   // Load user's data files on mount
   useEffect(() => {
@@ -48,12 +52,14 @@ const ForecastingPage = () => {
       .finally(() => setLoadingFiles(false));
   }, [user]);
 
+  // ── Call Python backend for XGBoost forecast ──────────────────────────────
   const runForecastForFile = useCallback(async (fileId, horizonDays) => {
+    if (!fileId) return;
     const fileRecord = dataFiles.find((f) => f.id === fileId);
     if (!fileRecord) return;
 
     if (!fileRecord.column_mapping?.date || !fileRecord.column_mapping?.units_sold) {
-      toast.error('This file needs "Date" and "Units Sold" columns mapped before forecasting. Go to Data Upload to remap.');
+      toast.error('This file needs "Date" and "Units Sold" columns mapped. Go to Data Upload to remap.');
       return;
     }
 
@@ -61,36 +67,22 @@ const ForecastingPage = () => {
     setAllResults(null);
     setChartData([]);
     setMetrics(null);
+    setModelType(null);
 
     try {
-      // 1. Download actual file from Supabase Storage
-      const url = await getFileDownloadUrl(fileRecord.storage_path);
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error('Failed to download file');
-      const csvText = await resp.text();
+      const response = await forecastApi.runForecast(fileId, horizonDays);
+      const { skus, results } = response.data;
 
-      // 2. Extract time series from actual CSV data using the saved column mapping
-      const { series, error } = extractTimeSeries(csvText, fileRecord.column_mapping);
-      if (error) throw new Error(error);
-      if (Object.keys(series).length === 0) throw new Error('No usable data rows found in file.');
-
-      // 3. Run multi-SKU forecast
-      const results = runMultiSKUForecast(series, horizonDays);
-
-      // 4. Build "All Products" aggregate
-      const aggSeries = aggregateSeries(series);
-      const aggResult = runForecast(aggSeries, horizonDays);
-      results['All Products'] = aggResult;
-
-      const skus = ['All Products', ...Object.keys(series)];
       setSkuList(skus);
       setAllResults(results);
       setSelectedSKU('All Products');
-      applyResult(aggResult);
+      applyResult(results['All Products']);
 
-      toast.success(`Forecast complete — ${Object.keys(series).length} product(s) analysed`);
+      const skuCount = skus.length - 1; // exclude "All Products"
+      toast.success(`XGBoost forecast complete — ${skuCount} product(s) analysed`);
     } catch (err) {
-      toast.error(err.message || 'Forecast failed');
+      const detail = err.response?.data?.detail || err.message || 'Forecast failed';
+      toast.error(detail);
     } finally {
       setRunning(false);
     }
@@ -98,23 +90,21 @@ const ForecastingPage = () => {
 
   function applyResult(result) {
     if (!result || result.error) { setChartData([]); setMetrics(null); return; }
-    // Combine historical + forecast into one array for the chart
     const combined = [
       ...result.historical.map((p) => ({ date: p.date, actual: p.actual, smoothed: p.smoothed })),
       ...result.forecast.map((p) => ({ date: p.date, forecast: p.forecast, upper: p.upper, lower: p.lower })),
     ];
     setChartData(combined);
     setMetrics(result.metrics);
+    setModelType(result.model || null);
   }
 
-  // When user changes SKU selection
+  // Switch SKU view without re-running — results are already in memory
   useEffect(() => {
     if (!allResults || !selectedSKU) return;
-    const result = allResults[selectedSKU];
-    applyResult(result);
+    applyResult(allResults[selectedSKU]);
   }, [selectedSKU, allResults]);
 
-  // Re-run when horizon changes and we already have a file loaded
   const handleHorizonChange = (days) => {
     setHorizon(days);
     if (selectedFileId && dataFiles.length > 0) {
@@ -124,7 +114,7 @@ const ForecastingPage = () => {
 
   const handleRunForecast = () => runForecastForFile(selectedFileId, horizon);
 
-  // ─── No files state ─────────────────────────────────────────────────────────
+  // ── Empty states ────────────────────────────────────────────────────────────
   if (loadingFiles) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -140,9 +130,12 @@ const ForecastingPage = () => {
           <Upload className="h-10 w-10 text-foreground-secondary mx-auto mb-4" />
           <h2 className="text-lg font-semibold text-foreground mb-2">No data uploaded yet</h2>
           <p className="text-sm text-foreground-secondary mb-6 max-w-md mx-auto">
-            Upload your sales or inventory CSV to run real demand forecasting on your actual data.
+            Upload your sales or inventory CSV to run AI-powered demand forecasting on your actual data.
           </p>
-          <button onClick={() => navigate('/dashboard/data')} className="gradient-brand text-primary-foreground px-6 py-2.5 rounded-lg text-sm font-semibold hover-lift">
+          <button
+            onClick={() => navigate('/dashboard/data')}
+            className="gradient-brand text-primary-foreground px-6 py-2.5 rounded-lg text-sm font-semibold hover-lift"
+          >
             Upload Data →
           </button>
         </div>
@@ -150,13 +143,6 @@ const ForecastingPage = () => {
     );
   }
 
-  const trendIcon = metrics
-    ? metrics.trendPct > 2 ? <TrendingUp className="h-4 w-4 text-success" />
-      : metrics.trendPct < -2 ? <TrendingDown className="h-4 w-4 text-destructive" />
-      : <Minus className="h-4 w-4 text-foreground-secondary" />
-    : null;
-
-  // Build per-SKU table
   const skuTableRows = allResults
     ? Object.entries(allResults)
         .filter(([sku]) => sku !== 'All Products')
@@ -181,10 +167,15 @@ const ForecastingPage = () => {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Demand Forecasting</h1>
           <p className="text-sm text-foreground-secondary">
-            Real predictions from your actual data · Trend + weekly seasonality model
+            {modelType === 'xgboost'
+              ? 'XGBoost ML model · Lag + seasonality features · Trained on your data'
+              : modelType === 'linear'
+                ? 'Linear regression model · Trend + seasonality'
+                : 'AI-powered predictions from your actual data'}
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          {/* File selector */}
           <select
             value={selectedFileId}
             onChange={(e) => setSelectedFileId(e.target.value)}
@@ -192,6 +183,8 @@ const ForecastingPage = () => {
           >
             {dataFiles.map((f) => <option key={f.id} value={f.id}>{f.file_name}</option>)}
           </select>
+
+          {/* SKU selector — populated after forecast runs */}
           <select
             value={selectedSKU}
             onChange={(e) => setSelectedSKU(e.target.value)}
@@ -199,21 +192,34 @@ const ForecastingPage = () => {
           >
             {skuList.map((s) => <option key={s}>{s}</option>)}
           </select>
+
+          {/* Horizon toggle */}
           <div className="flex bg-muted rounded-lg p-0.5">
             {HORIZONS.map(({ label, days }) => (
-              <button key={label} onClick={() => handleHorizonChange(days)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${horizon === days ? 'gradient-brand text-primary-foreground' : 'text-foreground-secondary hover:text-foreground'}`}>
+              <button
+                key={label}
+                onClick={() => handleHorizonChange(days)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  horizon === days
+                    ? 'gradient-brand text-primary-foreground'
+                    : 'text-foreground-secondary hover:text-foreground'
+                }`}
+              >
                 {label}
               </button>
             ))}
           </div>
+
+          {/* Run button */}
           <button
             onClick={handleRunForecast}
             disabled={running || !selectedFileId}
             className="gradient-brand text-primary-foreground px-4 py-2 rounded-lg text-sm font-semibold hover-lift disabled:opacity-50 flex items-center gap-2"
           >
-            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            {running ? 'Running...' : 'Run Forecast'}
+            {running
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <RefreshCw className="h-4 w-4" />}
+            {running ? 'Running ML...' : 'Run Forecast'}
           </button>
         </div>
       </div>
@@ -222,15 +228,45 @@ const ForecastingPage = () => {
       {metrics ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: `Predicted Demand (${horizon}d)`, value: metrics.totalForecast.toLocaleString() + ' units', sub: `~${metrics.avgDaily}/day avg` },
-            { label: 'Model Accuracy (R²)', value: `${metrics.r2}%`, sub: `RMSE ±${metrics.rmse} units`, highlight: metrics.r2 > 70 ? 'success' : metrics.r2 > 40 ? 'warning' : 'destructive' },
-            { label: '30-Day Trend', value: `${metrics.trendPct > 0 ? '+' : ''}${metrics.trendPct}%`, sub: metrics.trendPct > 0 ? 'Growing demand' : metrics.trendPct < 0 ? 'Declining demand' : 'Stable demand' },
-            { label: 'Peak Forecast Day', value: metrics.peakDay ? new Date(metrics.peakDay + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—', sub: metrics.peakValue ? `${metrics.peakValue} units` : '' },
+            {
+              label: `Predicted Demand (${horizon}d)`,
+              value: metrics.totalForecast.toLocaleString() + ' units',
+              sub: `~${metrics.avgDaily}/day avg`,
+            },
+            {
+              label: 'Model Accuracy (R²)',
+              value: `${metrics.r2}%`,
+              sub: `RMSE ±${metrics.rmse} units`,
+              highlight: metrics.r2 > 70 ? 'success' : metrics.r2 > 40 ? 'warning' : 'destructive',
+            },
+            {
+              label: '30-Day Trend',
+              value: `${metrics.trendPct > 0 ? '+' : ''}${metrics.trendPct}%`,
+              sub: metrics.trendPct > 0
+                ? 'Growing demand'
+                : metrics.trendPct < 0 ? 'Declining demand' : 'Stable demand',
+            },
+            {
+              label: 'Peak Forecast Day',
+              value: metrics.peakDay
+                ? new Date(metrics.peakDay + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+                : '—',
+              sub: metrics.peakValue ? `${metrics.peakValue} units` : '',
+            },
           ].map((item, i) => (
-            <motion.div key={item.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }}
-              className="glass-card p-4 rounded-xl">
+            <motion.div
+              key={item.label}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.08 }}
+              className="glass-card p-4 rounded-xl"
+            >
               <p className="text-xs text-foreground-secondary mb-1">{item.label}</p>
-              <p className={`text-xl font-bold ${item.highlight === 'success' ? 'text-success' : item.highlight === 'destructive' ? 'text-destructive' : 'text-foreground'}`}>
+              <p className={`text-xl font-bold ${
+                item.highlight === 'success' ? 'text-success'
+                  : item.highlight === 'destructive' ? 'text-destructive'
+                  : 'text-foreground'
+              }`}>
                 {item.value}
               </p>
               {item.sub && <p className="text-xs text-foreground-secondary mt-0.5">{item.sub}</p>}
@@ -239,7 +275,7 @@ const ForecastingPage = () => {
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[0,1,2,3].map((i) => (
+          {[0, 1, 2, 3].map((i) => (
             <div key={i} className="glass-card p-4 rounded-xl">
               <div className="h-3 bg-muted rounded w-24 mb-2" />
               <div className="h-6 bg-muted rounded w-16" />
@@ -253,6 +289,11 @@ const ForecastingPage = () => {
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-foreground">
             Historical vs Forecast — {selectedSKU}
+            {modelType && (
+              <span className="ml-2 text-xs font-normal text-foreground-secondary">
+                ({modelType === 'xgboost' ? 'XGBoost' : 'Linear Regression'})
+              </span>
+            )}
           </h3>
           {!allResults && !running && (
             <p className="text-xs text-foreground-secondary">Click "Run Forecast" to analyse your data</p>
@@ -263,7 +304,8 @@ const ForecastingPage = () => {
           <div className="h-[350px] flex items-center justify-center">
             <div className="text-center space-y-3">
               <Loader2 className="h-8 w-8 text-primary animate-spin mx-auto" />
-              <p className="text-sm text-foreground-secondary">Downloading data and computing forecast…</p>
+              <p className="text-sm text-foreground-secondary">Running XGBoost on your data…</p>
+              <p className="text-xs text-foreground-secondary">Training per-SKU models with lag + seasonality features</p>
             </div>
           </div>
         ) : chartData.length > 0 ? (
@@ -277,11 +319,21 @@ const ForecastingPage = () => {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="hsl(var(--foreground-secondary))"
-                  tickFormatter={(v) => v.slice(5)} interval="preserveStartEnd" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 10 }}
+                  stroke="hsl(var(--foreground-secondary))"
+                  tickFormatter={(v) => v.slice(5)}
+                  interval="preserveStartEnd"
+                />
                 <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--foreground-secondary))" />
                 <Tooltip
-                  contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
+                  contentStyle={{
+                    background: 'hsl(var(--card))',
+                    border: '1px solid hsl(var(--border))',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                  }}
                   formatter={(val, name) => [val != null ? val.toLocaleString() : '—', name]}
                 />
                 <Area type="monotone" dataKey="upper" stroke="none" fill="url(#confBand)" />
@@ -289,7 +341,12 @@ const ForecastingPage = () => {
                 <Line type="monotone" dataKey="actual" stroke="hsl(217,91%,60%)" strokeWidth={2} dot={false} name="Actual" />
                 <Line type="monotone" dataKey="smoothed" stroke="hsl(38,92%,60%)" strokeWidth={1.5} strokeDasharray="4 2" dot={false} name="7-day MA" />
                 <Line type="monotone" dataKey="forecast" stroke="hsl(263,70%,58%)" strokeWidth={2} strokeDasharray="6 3" dot={false} name="Forecast" />
-                <ReferenceLine x={new Date().toISOString().split('T')[0]} stroke="hsl(var(--border))" strokeDasharray="3 3" label={{ value: 'Today', position: 'top', fontSize: 10, fill: 'hsl(var(--foreground-secondary))' }} />
+                <ReferenceLine
+                  x={new Date().toISOString().split('T')[0]}
+                  stroke="hsl(var(--border))"
+                  strokeDasharray="3 3"
+                  label={{ value: 'Today', position: 'top', fontSize: 10, fill: 'hsl(var(--foreground-secondary))' }}
+                />
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex items-center gap-6 mt-4 justify-center flex-wrap">
@@ -297,13 +354,13 @@ const ForecastingPage = () => {
                 <span className="h-0.5 w-6 rounded" style={{ background: 'hsl(217,91%,60%)' }} /> Actual
               </span>
               <span className="flex items-center gap-2 text-xs text-foreground-secondary">
-                <span className="h-0.5 w-6 rounded" style={{ background: 'hsl(38,92%,60%)', borderTop: '2px dashed' }} /> 7-day MA
+                <span className="h-0.5 w-6 rounded" style={{ background: 'hsl(38,92%,60%)' }} /> 7-day MA
               </span>
               <span className="flex items-center gap-2 text-xs text-foreground-secondary">
-                <span className="h-0.5 w-6 rounded" style={{ background: 'hsl(263,70%,58%)', borderTop: '2px dashed' }} /> Forecast
+                <span className="h-0.5 w-6 rounded" style={{ background: 'hsl(263,70%,58%)' }} /> Forecast
               </span>
               <span className="flex items-center gap-2 text-xs text-foreground-secondary">
-                <span className="h-3 w-6 rounded" style={{ background: 'hsl(217,91%,60%,0.1)' }} /> Confidence Band
+                <span className="h-3 w-6 rounded opacity-20" style={{ background: 'hsl(217,91%,60%)' }} /> Confidence Band
               </span>
             </div>
           </>
@@ -325,21 +382,35 @@ const ForecastingPage = () => {
             <BarChart data={metrics.weeklyFactors} barSize={32}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis dataKey="day" tick={{ fontSize: 11 }} stroke="hsl(var(--foreground-secondary))" />
-              <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--foreground-secondary))" tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} domain={[0, 'auto']} />
+              <YAxis
+                tick={{ fontSize: 10 }}
+                stroke="hsl(var(--foreground-secondary))"
+                tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
+                domain={[0, 'auto']}
+              />
               <Tooltip
-                contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
+                contentStyle={{
+                  background: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                }}
                 formatter={(v) => [`${(v * 100).toFixed(1)}% of average`, 'Seasonal factor']}
               />
               <ReferenceLine y={1} stroke="hsl(var(--border))" strokeDasharray="4 2" />
               <Bar dataKey="factor" radius={[4, 4, 0, 0]}>
                 {metrics.weeklyFactors.map((entry, i) => (
-                  <Cell key={i} fill={entry.factor >= 1 ? 'hsl(217,91%,60%)' : 'hsl(var(--foreground-secondary))'} fillOpacity={0.8} />
+                  <Cell
+                    key={i}
+                    fill={entry.factor >= 1 ? 'hsl(217,91%,60%)' : 'hsl(var(--foreground-secondary))'}
+                    fillOpacity={0.8}
+                  />
                 ))}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
           <p className="text-xs text-foreground-secondary mt-2 text-center">
-            Bars above 100% = above-average demand days · Used to modulate the forecast
+            Bars above 100% = above-average demand days · Used by the model to modulate the forecast
           </p>
         </div>
       )}
@@ -366,18 +437,26 @@ const ForecastingPage = () => {
                   <tr
                     key={row.sku}
                     onClick={() => setSelectedSKU(row.sku)}
-                    className={`border-b border-border hover:bg-background-elevated/30 transition-colors cursor-pointer ${selectedSKU === row.sku ? 'bg-primary/5' : ''}`}
+                    className={`border-b border-border hover:bg-background-elevated/30 transition-colors cursor-pointer ${
+                      selectedSKU === row.sku ? 'bg-primary/5' : ''
+                    }`}
                   >
                     <td className="px-4 py-3 font-medium text-foreground max-w-[200px] truncate">{row.sku}</td>
                     <td className="px-4 py-3 text-foreground-secondary">
-                      {row.error ? <span className="text-xs text-warning">Insufficient data</span> : typeof row.totalForecast === 'number' ? row.totalForecast.toLocaleString() : row.totalForecast}
+                      {row.error
+                        ? <span className="text-xs text-warning">Insufficient data</span>
+                        : typeof row.totalForecast === 'number'
+                          ? row.totalForecast.toLocaleString()
+                          : row.totalForecast}
                     </td>
                     <td className="px-4 py-3 text-foreground-secondary">
                       {typeof row.avgDaily === 'number' ? row.avgDaily.toLocaleString() : row.avgDaily}
                     </td>
                     <td className="px-4 py-3">
                       {row.trendPct != null ? (
-                        <span className={`text-xs font-semibold flex items-center gap-1 ${row.trendPct > 2 ? 'text-success' : row.trendPct < -2 ? 'text-destructive' : 'text-foreground-secondary'}`}>
+                        <span className={`text-xs font-semibold flex items-center gap-1 ${
+                          row.trendPct > 2 ? 'text-success' : row.trendPct < -2 ? 'text-destructive' : 'text-foreground-secondary'
+                        }`}>
                           {row.trendPct > 2 ? '▲' : row.trendPct < -2 ? '▼' : '→'}
                           {row.trendPct > 0 ? '+' : ''}{row.trendPct}%
                         </span>
@@ -385,7 +464,11 @@ const ForecastingPage = () => {
                     </td>
                     <td className="px-4 py-3">
                       {row.r2 != null ? (
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${row.r2 > 70 ? 'bg-success/10 text-success' : row.r2 > 40 ? 'bg-warning/10 text-warning' : 'bg-destructive/10 text-destructive'}`}>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                          row.r2 > 70 ? 'bg-success/10 text-success'
+                            : row.r2 > 40 ? 'bg-warning/10 text-warning'
+                            : 'bg-destructive/10 text-destructive'
+                        }`}>
                           R²={row.r2}%
                         </span>
                       ) : '—'}
@@ -422,8 +505,11 @@ const ForecastingPage = () => {
             'Which products should I reorder first based on trend?',
             'How do I improve my forecast model accuracy?',
           ].map((q) => (
-            <button key={q} onClick={openChat}
-              className="p-3 rounded-lg border border-accent/20 bg-accent/5 text-sm text-foreground-secondary text-left hover:bg-accent/10 transition-colors">
+            <button
+              key={q}
+              onClick={openChat}
+              className="p-3 rounded-lg border border-accent/20 bg-accent/5 text-sm text-foreground-secondary text-left hover:bg-accent/10 transition-colors"
+            >
               "{q}"
             </button>
           ))}

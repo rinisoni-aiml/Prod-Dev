@@ -56,6 +56,13 @@ export const dashboardApi = {
 
 // ── FMCG: Forecasting ─────────────────────────────────────────────────────────
 export const forecastApi = {
+  // Run XGBoost forecast on an uploaded file (all SKUs or a specific one)
+  runForecast: (fileId, horizon, sku = null) =>
+    api.post('/api/fmcg/forecasting/run', { file_id: fileId, horizon, sku }),
+  // List SKUs available in an uploaded file (fast — no ML computation)
+  getFileSKUs: (fileId) =>
+    api.get('/api/fmcg/forecasting/file-skus', { params: { file_id: fileId } }),
+  // Legacy: forecast from demand_history table
   getForecast: (params) => api.get('/api/fmcg/forecasting', { params }),
   getSeasonality: () => api.get('/api/fmcg/forecasting/seasonality'),
   getProducts: () => api.get('/api/fmcg/forecasting/products'),
