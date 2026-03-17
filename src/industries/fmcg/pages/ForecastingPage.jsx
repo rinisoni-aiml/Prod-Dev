@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useFmcgStore } from '@/stores/fmcgStore';
 import { fetchDataFiles } from '@/lib/dataFiles';
 import { forecastApi } from '@/lib/api';
 import { useNavigate } from 'react-router-dom';
@@ -24,6 +25,7 @@ const HORIZONS = [
 const ForecastingPage = () => {
   const { user } = useAuthStore();
   const { openChat } = useChatStore();
+  const { forecastResults: storedResults, setForecastResults } = useFmcgStore();
   const navigate = useNavigate();
 
   const [dataFiles, setDataFiles] = useState([]);
@@ -40,7 +42,7 @@ const ForecastingPage = () => {
   const [metrics, setMetrics] = useState(null);
   const [modelType, setModelType] = useState(null);
 
-  // Load user's data files on mount
+  // Load user's data files on mount, then try to restore persisted results
   useEffect(() => {
     if (!user) return;
     fetchDataFiles(user.id)
@@ -50,10 +52,26 @@ const ForecastingPage = () => {
           (f) => !f.column_mapping?.__purpose__ || f.column_mapping.__purpose__ === 'forecasting'
         );
         setDataFiles(filtered);
-        if (filtered.length > 0) setSelectedFileId(filtered[0].id);
+
+        // Restore previous forecast results if file still exists
+        if (
+          storedResults &&
+          filtered.some((f) => f.id === storedResults.selectedFileId)
+        ) {
+          setSelectedFileId(storedResults.selectedFileId);
+          setHorizon(storedResults.horizon);
+          setSkuList(storedResults.skuList);
+          setAllResults(storedResults.allResults);
+          setModelType(storedResults.modelType);
+          const allProductsResult = storedResults.allResults?.['All Products'];
+          if (allProductsResult) applyResult(allProductsResult);
+        } else if (filtered.length > 0) {
+          setSelectedFileId(filtered[0].id);
+        }
       })
       .catch(() => toast.error('Failed to load data files'))
       .finally(() => setLoadingFiles(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   // ── Call Python backend for XGBoost forecast ──────────────────────────────
@@ -81,6 +99,15 @@ const ForecastingPage = () => {
       setAllResults(results);
       setSelectedSKU('All Products');
       applyResult(results['All Products']);
+
+      // Persist results so they survive navigation
+      setForecastResults({
+        allResults: results,
+        skuList: skus,
+        horizon: horizonDays,
+        selectedFileId: fileId,
+        modelType: results['All Products']?.model || null,
+      });
 
       const skuCount = skus.length - 1; // exclude "All Products"
       toast.success(`XGBoost forecast complete — ${skuCount} product(s) analysed`);
@@ -223,7 +250,7 @@ const ForecastingPage = () => {
             {running
               ? <Loader2 className="h-4 w-4 animate-spin" />
               : <RefreshCw className="h-4 w-4" />}
-            {running ? 'Running ML...' : 'Run Forecast'}
+            {running ? 'Running ML...' : allResults ? 'Re-run Forecast' : 'Run Forecast'}
           </button>
         </div>
       </div>

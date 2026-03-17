@@ -10,6 +10,40 @@ from app.services.fmcg.inventory_optimizer import (
 router = APIRouter()
 
 
+# ─── DB persistence helper ────────────────────────────────────────────────────
+
+def _persist_inventory_items(uid: str, by_sku: list):
+    """Save inventory optimization results to inventory_items table."""
+    STATUS_MAP = {
+        "stockout": "stockout",
+        "order_now": "low_stock",
+        "watch": "low_stock",
+        "overstock": "overstock",
+        "ok": "optimal",
+    }
+    try:
+        items = []
+        for item in by_sku:
+            sku = item.get("sku")
+            if not sku:
+                continue
+            items.append({
+                "user_id": uid,
+                "sku": sku,
+                "product_name": sku,
+                "current_stock": item.get("current_stock", 0),
+                "daily_avg_demand": item.get("avg_daily_demand", 0),
+                "days_left": item.get("days_remaining"),
+                "status": STATUS_MAP.get(item.get("status", "ok"), "optimal"),
+            })
+        if not items:
+            return
+        supabase.table("inventory_items").delete().eq("user_id", uid).execute()
+        supabase.table("inventory_items").insert(items).execute()
+    except Exception:
+        pass
+
+
 # ─── Inventory optimization ───────────────────────────────────────────────────
 
 class OptimizeRequest(BaseModel):
@@ -67,6 +101,8 @@ async def optimize_inventory(body: OptimizeRequest, current_user=Depends(get_cur
             order_cost=body.order_cost,
             holding_cost_pct=body.holding_cost_pct,
         )
+        # Persist results to inventory_items for dashboard (best-effort)
+        _persist_inventory_items(uid, result.get("by_sku", []))
         return result
 
     except HTTPException:

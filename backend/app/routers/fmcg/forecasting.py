@@ -15,6 +15,34 @@ import pandas as pd
 router = APIRouter()
 
 
+# ─── DB persistence helpers ──────────────────────────────────────────────────
+
+def _persist_demand_history(uid: str, results: dict):
+    """Save per-SKU historical data from forecast results to demand_history table."""
+    try:
+        rows = []
+        for sku_name, result in results.items():
+            if sku_name == "All Products" or result.get("error"):
+                continue
+            for point in result.get("historical", []):
+                date = point.get("date")
+                actual = point.get("actual")
+                if date and actual is not None:
+                    rows.append({
+                        "user_id": uid,
+                        "date": date,
+                        "sku": sku_name,
+                        "units": int(actual),
+                    })
+        if not rows:
+            return
+        supabase.table("demand_history").delete().eq("user_id", uid).execute()
+        for i in range(0, len(rows), 500):
+            supabase.table("demand_history").insert(rows[i:i + 500]).execute()
+    except Exception:
+        pass
+
+
 # ─── Request model ───────────────────────────────────────────────────────────
 
 class ForecastRunRequest(BaseModel):
@@ -82,7 +110,10 @@ async def run_forecast(body: ForecastRunRequest, current_user=Depends(get_curren
             }
 
         # All-SKUs request (default)
-        return run_all_skus_forecast(df, horizon)
+        run_result = run_all_skus_forecast(df, horizon)
+        # Persist historical data to demand_history for dashboard (best-effort)
+        _persist_demand_history(uid, run_result.get("results", {}))
+        return run_result
 
     except HTTPException:
         raise

@@ -1,11 +1,14 @@
 import { useState, useCallback, useEffect } from 'react';
 import {
   Upload, FileText, Trash2, Download, RefreshCw, Plus, Loader2,
-  TrendingUp, Package,
+  TrendingUp, Package, CheckCircle2,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
+import { useFmcgStore } from '@/stores/fmcgStore';
+import { forecastApi, inventoryApi } from '@/lib/api';
 import { uploadDataFile, fetchDataFiles, deleteDataFile, getFileDownloadUrl } from '@/lib/dataFiles';
 import SchemaMapping, {
   FORECASTING_FIELDS,
@@ -89,10 +92,9 @@ const UploadSection = ({
     try {
       // Embed purpose in the column_mapping so it can be filtered later
       const mappingWithPurpose = { ...entry.mapping, __purpose__: purpose };
-      await uploadDataFile(user.id, entry.file, mappingWithPurpose, entry.previewRows.length);
+      const saved = await uploadDataFile(user.id, entry.file, mappingWithPurpose, entry.previewRows.length);
       setPendingFiles((prev) => prev.filter((f) => f.id !== fileId));
-      await onSaved();
-      toast.success('File uploaded!');
+      await onSaved(saved?.id, purpose);
     } catch (err) {
       setPendingFiles((prev) => prev.map((f) => f.id === fileId ? { ...f, status: 'mapping' } : f));
       toast.error(err.message || 'Upload failed');
@@ -172,10 +174,13 @@ const UploadSection = ({
 
 const DataUploadPage = () => {
   const { user } = useAuthStore();
+  const { setForecastResults, setInventoryResults } = useFmcgStore();
+  const queryClient = useQueryClient();
   const [savedFiles, setSavedFiles] = useState([]);
   const [loadingSaved, setLoadingSaved] = useState(true);
   const [forecastFiles, setForecastFiles] = useState([]);
   const [inventoryFiles, setInventoryFiles] = useState([]);
+  const [autoRun, setAutoRun] = useState(null); // { message, step, done }
 
   const loadSavedFiles = useCallback(async () => {
     if (!user) return;
@@ -190,6 +195,44 @@ const DataUploadPage = () => {
   }, [user]);
 
   useEffect(() => { loadSavedFiles(); }, [loadSavedFiles]);
+
+  const triggerAutoRun = useCallback(async (fileId, purpose) => {
+    if (!fileId) return;
+    try {
+      if (purpose === 'forecasting') {
+        setAutoRun({ message: 'Running demand forecast on your data…', step: 'forecast', done: false });
+        const response = await forecastApi.runForecast(fileId, 30);
+        const { skus, results } = response.data;
+        setForecastResults({
+          allResults: results,
+          skuList: skus,
+          horizon: 30,
+          selectedFileId: fileId,
+          modelType: results?.['All Products']?.model || null,
+        });
+        queryClient.invalidateQueries({ queryKey: ['dashboard-demand-trend'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard-top-skus'] });
+        setAutoRun({ message: 'Forecast ready! Your dashboard has been updated.', step: 'forecast', done: true });
+      } else if (purpose === 'inventory') {
+        setAutoRun({ message: 'Running inventory optimization on your data…', step: 'inventory', done: false });
+        const response = await inventoryApi.runOptimization({ file_id: fileId });
+        setInventoryResults({ bySku: response.data.by_sku, byWarehouse: response.data.by_warehouse, fileId });
+        queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-snapshot'] });
+        setAutoRun({ message: 'Inventory optimization ready! Your dashboard has been updated.', step: 'inventory', done: true });
+      }
+      setTimeout(() => setAutoRun(null), 3000);
+    } catch {
+      setAutoRun(null);
+      toast.error('Auto-analysis failed — you can run it manually from the Forecasting or Inventory pages.');
+    }
+  }, [setForecastResults, setInventoryResults, queryClient]);
+
+  const handleFileSaved = useCallback(async (savedFileId, purpose) => {
+    await loadSavedFiles();
+    toast.success('File uploaded!');
+    triggerAutoRun(savedFileId, purpose);
+  }, [loadSavedFiles, triggerAutoRun]);
 
   const handleDelete = async (file) => {
     try {
@@ -233,6 +276,26 @@ const DataUploadPage = () => {
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 py-6 space-y-6">
+
+      {/* ── Auto-run processing overlay ── */}
+      {autoRun && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center">
+          <div className="glass-card p-8 rounded-2xl text-center max-w-sm w-full mx-4 shadow-xl">
+            {autoRun.done ? (
+              <CheckCircle2 className="h-10 w-10 text-success mx-auto mb-4" />
+            ) : (
+              <Loader2 className="h-10 w-10 text-primary animate-spin mx-auto mb-4" />
+            )}
+            <p className="text-base font-semibold text-foreground">{autoRun.message}</p>
+            {!autoRun.done && (
+              <p className="text-sm text-foreground-secondary mt-2">
+                Hang tight — we're analysing your data with AI
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       <div>
         <h1 className="text-2xl font-bold text-foreground">Data Management</h1>
         <p className="text-sm text-foreground-secondary">
@@ -251,7 +314,7 @@ const DataUploadPage = () => {
         pendingFiles={forecastFiles}
         setPendingFiles={setForecastFiles}
         user={user}
-        onSaved={loadSavedFiles}
+        onSaved={handleFileSaved}
       />
 
       {/* ── Inventory Optimization section ── */}
@@ -265,7 +328,7 @@ const DataUploadPage = () => {
         pendingFiles={inventoryFiles}
         setPendingFiles={setInventoryFiles}
         user={user}
-        onSaved={loadSavedFiles}
+        onSaved={handleFileSaved}
       />
 
       {/* ── Saved files ── */}
