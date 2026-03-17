@@ -77,6 +77,115 @@ export const DEFAULT_PLATFORM_FIELDS = [
   },
 ];
 
+// ─── Purpose-specific field sets ──────────────────────────────────────────────
+
+export const FORECASTING_FIELDS = [
+  {
+    key: 'date',
+    label: 'Date / Time',
+    description: 'Transaction or order date',
+    impact: 'Required. Without a date column no time-series analysis can run.',
+    example: '2024-01-15, 15/01/2024',
+    required: true,
+  },
+  {
+    key: 'units_sold',
+    label: 'Units Sold / Quantity',
+    description: 'Number of units sold or ordered',
+    impact: 'The core demand metric. Required to run any forecast.',
+    example: '120, 450, 1200',
+    required: true,
+  },
+  {
+    key: 'sku',
+    label: 'SKU / Product ID',
+    description: 'Unique product code or identifier',
+    impact: 'Enables per-SKU forecasts and top-product rankings.',
+    example: 'WF-5KG, SO-1L-001',
+    required: false,
+    recommended: true,
+  },
+  {
+    key: 'product_name',
+    label: 'Product Name',
+    description: 'Name or description of the product',
+    impact: 'Labels charts and tables with readable product names.',
+    example: 'Wheat Flour 5kg, Sunflower Oil',
+    required: false,
+    recommended: true,
+  },
+  {
+    key: 'region',
+    label: 'Region / Territory',
+    description: 'Sales region or geographic zone',
+    impact: 'Enables regional demand breakdown.',
+    example: 'North, South, West',
+    required: false,
+  },
+  {
+    key: 'unit_price',
+    label: 'Unit Price / Revenue',
+    description: 'Price per unit or transaction value',
+    impact: 'Enables revenue forecasting alongside volume.',
+    example: '45.00, 120.50',
+    required: false,
+  },
+];
+
+export const INVENTORY_FIELDS = [
+  {
+    key: 'date',
+    label: 'Date / Time',
+    description: 'Transaction or stock record date',
+    impact: 'Required. Used to calculate average daily demand.',
+    example: '2024-01-15, 15/01/2024',
+    required: true,
+  },
+  {
+    key: 'units_sold',
+    label: 'Units Sold / Quantity',
+    description: 'Units sold, consumed, or dispatched',
+    impact: 'Required. Drives Safety Stock, ROP, and EOQ calculations.',
+    example: '120, 450, 1200',
+    required: true,
+  },
+  {
+    key: 'sku',
+    label: 'SKU / Product ID',
+    description: 'Unique product code or identifier',
+    impact: 'Enables per-SKU optimization results.',
+    example: 'WF-5KG, SO-1L-001',
+    required: false,
+    recommended: true,
+  },
+  {
+    key: 'product_name',
+    label: 'Product Name',
+    description: 'Name or description of the product',
+    impact: 'Labels inventory tables with readable product names.',
+    example: 'Wheat Flour 5kg, Sunflower Oil',
+    required: false,
+    recommended: true,
+  },
+  {
+    key: 'stock_level',
+    label: 'Stock Level / Inventory',
+    description: 'Current on-hand inventory quantity',
+    impact: 'Powers stockout risk, days-of-supply, and reorder alerts.',
+    example: '350, 0, 1200',
+    required: false,
+    recommended: true,
+  },
+  {
+    key: 'warehouse',
+    label: 'Warehouse / Location',
+    description: 'Warehouse, store or distribution centre name',
+    impact: 'Enables per-warehouse breakdown and location-level alerts.',
+    example: 'Mumbai-West, Delhi-North',
+    required: false,
+  },
+];
+
 const SKIP_VALUE = '__skip__';
 
 // ─── Fuzzy auto-mapping ───────────────────────────────────────────────────────

@@ -352,8 +352,12 @@ function OptimizationTab({ user }) {
     setLoadingFiles(true);
     try {
       const files = await fetchDataFiles(user.id);
-      setDataFiles(files);
-      if (files.length > 0) setFileId(files[0].id);
+      // Show files tagged for inventory, plus any legacy untagged files
+      const filtered = files.filter(
+        (f) => !f.column_mapping?.__purpose__ || f.column_mapping.__purpose__ === 'inventory'
+      );
+      setDataFiles(filtered);
+      if (filtered.length > 0) setFileId(filtered[0].id);
     } catch {
       setDataFiles([]);
       toast.error('Failed to load data files');
