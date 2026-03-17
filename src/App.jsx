@@ -5,19 +5,22 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import { Toaster } from "react-hot-toast";
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
+
+// ── Shared pages (same for every industry) ───────────────────────────────────
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import OnboardingPage from "./pages/OnboardingPage";
-import DashboardPage from "./pages/DashboardPage";
-import ForecastingPage from "./pages/ForecastingPage";
-import InventoryPage from "./pages/InventoryPage";
-import ContractsAlertsPage from "./pages/ContractsAlertsPage";
-import DataUploadPage from "./pages/DataUploadPage";
 import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/SettingsPage";
 import AppLayout from "./components/layout/AppLayout";
 import NotFound from "./pages/NotFound";
+
+// ── Industry routes ───────────────────────────────────────────────────────────
+// Each industry exports fmcgDashboardRoutes (or equivalent) — an array of
+// { path, element } objects that are mounted inside the /dashboard shell.
+// To add a new industry: import its routes here and spread into the router below.
+import { fmcgDashboardRoutes } from './industries/fmcg/routes';
 
 const queryClient = new QueryClient();
 
@@ -84,21 +87,29 @@ const App = () => (
       <BrowserRouter>
         <AuthInitializer>
           <Routes>
+            {/* ── Public pages ───────────────────────────────────────────── */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/onboarding" element={
               <ProtectedRoute><OnboardingPage /></ProtectedRoute>
             } />
+
+            {/* ── Dashboard shell — industry pages render as children ─────── */}
             <Route path="/dashboard" element={
               <ProtectedRoute><AppLayout /></ProtectedRoute>
             }>
-              <Route index element={<DashboardPage />} />
-              <Route path="forecasting" element={<ForecastingPage />} />
-              <Route path="inventory" element={<InventoryPage />} />
-              <Route path="contracts" element={<ContractsAlertsPage />} />
-              <Route path="data" element={<DataUploadPage />} />
+              {fmcgDashboardRoutes.map((route, i) =>
+                route.index
+                  ? <Route key={i} index element={route.element} />
+                  : <Route key={i} path={route.path} element={route.element} />
+              )}
+              {/* Future industry routes are added here by importing and spreading
+                  their route arrays. Example:
+                  {healthcareDashboardRoutes.map((route, i) => ...)} */}
             </Route>
+
+            {/* ── Shared authenticated pages ──────────────────────────────── */}
             <Route path="/profile" element={
               <ProtectedRoute><AppLayout /></ProtectedRoute>
             }>
@@ -109,6 +120,7 @@ const App = () => (
             }>
               <Route index element={<SettingsPage />} />
             </Route>
+
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthInitializer>

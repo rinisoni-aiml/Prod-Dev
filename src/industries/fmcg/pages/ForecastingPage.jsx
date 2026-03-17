@@ -284,16 +284,11 @@ const ForecastingPage = () => {
                   contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
                   formatter={(val, name) => [val != null ? val.toLocaleString() : '—', name]}
                 />
-                {/* Confidence band */}
                 <Area type="monotone" dataKey="upper" stroke="none" fill="url(#confBand)" />
                 <Area type="monotone" dataKey="lower" stroke="none" fill="transparent" />
-                {/* Historical actual */}
                 <Line type="monotone" dataKey="actual" stroke="hsl(217,91%,60%)" strokeWidth={2} dot={false} name="Actual" />
-                {/* Smoothed trend */}
                 <Line type="monotone" dataKey="smoothed" stroke="hsl(38,92%,60%)" strokeWidth={1.5} strokeDasharray="4 2" dot={false} name="7-day MA" />
-                {/* Forecast */}
                 <Line type="monotone" dataKey="forecast" stroke="hsl(263,70%,58%)" strokeWidth={2} strokeDasharray="6 3" dot={false} name="Forecast" />
-                {/* Today line */}
                 <ReferenceLine x={new Date().toISOString().split('T')[0]} stroke="hsl(var(--border))" strokeDasharray="3 3" label={{ value: 'Today', position: 'top', fontSize: 10, fill: 'hsl(var(--foreground-secondary))' }} />
               </ComposedChart>
             </ResponsiveContainer>
