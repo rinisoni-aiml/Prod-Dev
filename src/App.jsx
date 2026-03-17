@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
@@ -40,6 +40,7 @@ const ProtectedRoute = ({ children }) => {
 
 const AuthInitializer = ({ children }) => {
   const { setUser, setProfile, setLoading, fetchProfile } = useAuthStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return; }
@@ -53,10 +54,24 @@ const AuthInitializer = ({ children }) => {
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         setUser(session.user);
-        fetchProfile(session.user.id);
+        // After email confirmation, redirect to onboarding or dashboard
+        if (event === 'SIGNED_IN') {
+          fetchProfile(session.user.id).then((profile) => {
+            const publicPaths = ['/', '/login', '/signup'];
+            if (publicPaths.includes(window.location.pathname)) {
+              if (profile?.onboarding_completed) {
+                navigate('/dashboard');
+              } else {
+                navigate('/onboarding');
+              }
+            }
+          });
+        } else {
+          fetchProfile(session.user.id);
+        }
       } else {
         setUser(null);
         setProfile(null);
