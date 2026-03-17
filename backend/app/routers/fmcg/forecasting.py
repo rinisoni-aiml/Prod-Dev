@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from app.dependencies import get_current_user
 from app.utils.supabase_client import supabase
-from app.services.forecast_service import generate_forecast
+from app.services.fmcg.forecast_service import generate_forecast
 from datetime import datetime, timedelta
 
 router = APIRouter()

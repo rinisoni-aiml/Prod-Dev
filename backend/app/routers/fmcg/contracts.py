@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from app.models.contracts import ContractCreate, ContractUpdate
+from app.models.fmcg.contracts import ContractCreate, ContractUpdate
 from app.dependencies import get_current_user
 from app.utils.supabase_client import supabase
 

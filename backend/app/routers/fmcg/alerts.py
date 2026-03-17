@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app.models.alerts import AlertCreate
+from app.models.fmcg.alerts import AlertCreate
 from app.dependencies import get_current_user
 from app.utils.supabase_client import supabase
 from datetime import datetime, timezone

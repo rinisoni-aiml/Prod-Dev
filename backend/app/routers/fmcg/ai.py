@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
-from app.models.chat import ChatMessage, ChatResponse, ChatSession
+from app.models.fmcg.chat import ChatMessage, ChatResponse, ChatSession
 from app.dependencies import get_current_user
-from app.services.ai_service import generate_ai_response, generate_insights
+from app.services.fmcg.ai_service import generate_ai_response, generate_insights
 from app.utils.supabase_client import supabase
 
 router = APIRouter()
