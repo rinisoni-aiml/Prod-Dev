@@ -1,8 +1,80 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from app.dependencies import get_current_user
 from app.utils.supabase_client import supabase
+from app.services.fmcg.inventory_optimizer import (
+    parse_file_for_optimization,
+    run_inventory_optimization,
+)
 
 router = APIRouter()
+
+
+# ─── Inventory optimization ───────────────────────────────────────────────────
+
+class OptimizeRequest(BaseModel):
+    file_id: str
+    lead_time_days: int = 7          # supplier lead time in days
+    service_level: float = 0.95     # 0.90, 0.95, or 0.99
+    order_cost: float = 0.0         # $ cost per order (optional, used in EOQ)
+    holding_cost_pct: float = 0.0   # fraction of inventory value as annual holding cost
+
+
+@router.post("/optimize")
+async def optimize_inventory(body: OptimizeRequest, current_user=Depends(get_current_user)):
+    """
+    Run inventory optimization (Safety Stock, ROP, EOQ) from an uploaded file.
+    Returns per-SKU and per-warehouse recommendations.
+    """
+    uid = str(current_user.id)
+
+    # Validate params
+    if body.service_level not in (0.90, 0.95, 0.99):
+        body.service_level = 0.95
+    if body.lead_time_days < 1:
+        raise HTTPException(status_code=400, detail="lead_time_days must be at least 1")
+
+    try:
+        # Fetch file metadata
+        meta_resp = (
+            supabase.table("data_files")
+            .select("*")
+            .eq("id", body.file_id)
+            .eq("user_id", uid)
+            .single()
+            .execute()
+        )
+        if not meta_resp.data:
+            raise HTTPException(status_code=404, detail="File not found or access denied")
+
+        meta = meta_resp.data
+        storage_path = meta.get("storage_path")
+        column_mapping = meta.get("column_mapping") or {}
+        filename = meta.get("file_name", "file.csv")
+
+        if not storage_path:
+            raise HTTPException(status_code=400, detail="File has no storage path recorded")
+
+        # Download and parse
+        file_bytes = supabase.storage.from_("data-files").download(storage_path)
+        df = parse_file_for_optimization(file_bytes, filename, column_mapping)
+
+        # Run optimization
+        result = run_inventory_optimization(
+            df=df,
+            lead_time_days=body.lead_time_days,
+            service_level=body.service_level,
+            order_cost=body.order_cost,
+            holding_cost_pct=body.holding_cost_pct,
+        )
+        return result
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Optimization failed: {str(e)}")
 
 
 @router.get("/overview")

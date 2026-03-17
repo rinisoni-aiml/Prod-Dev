@@ -75,6 +75,8 @@ export const inventoryApi = {
   getWarehouseDetail: (id) => api.get(`/api/fmcg/inventory/warehouses/${id}`),
   getReorderQueue: () => api.get('/api/fmcg/inventory/reorder-queue'),
   getABCAnalysis: () => api.get('/api/fmcg/inventory/abc-analysis'),
+  // Run inventory optimization (Safety Stock, ROP, EOQ) from an uploaded file
+  runOptimization: (body) => api.post('/api/fmcg/inventory/optimize', body),
 };
 
 // ── FMCG: Contracts ───────────────────────────────────────────────────────────
