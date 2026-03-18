@@ -216,7 +216,7 @@ const DataUploadPage = () => {
       } else if (purpose === 'inventory') {
         setAutoRun({ message: 'Running inventory optimization on your data…', step: 'inventory', done: false });
         const response = await inventoryApi.runOptimization({ file_id: fileId });
-        setInventoryResults({ bySku: response.data.by_sku, byWarehouse: response.data.by_warehouse, fileId });
+        setInventoryResults(response.data);
         queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
         queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-snapshot'] });
         setAutoRun({ message: 'Inventory optimization ready! Your dashboard has been updated.', step: 'inventory', done: true });

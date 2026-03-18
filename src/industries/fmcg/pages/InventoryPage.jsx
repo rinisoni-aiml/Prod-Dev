@@ -373,7 +373,9 @@ function OptimizationTab({ user }) {
   // On mount: restore from Zustand (localStorage) or fetch from DB
   useEffect(() => {
     ensureFilesLoaded();
-    if (inventoryResults) {
+    // Guard: discard stale Zustand data from old DataUploadPage format (bySku/byWarehouse keys, no summary)
+    const isValidResult = inventoryResults && inventoryResults.by_sku && inventoryResults.summary;
+    if (isValidResult) {
       setResult(inventoryResults);
       // Pre-fill params from stored result if available
       if (inventoryResults.params) {
@@ -381,6 +383,10 @@ function OptimizationTab({ user }) {
         setServiceLevel(inventoryResults.params.service_level ?? 0.95);
       }
       return;
+    }
+    // Stale or missing local state — clear it and fetch from DB
+    if (inventoryResults && !isValidResult) {
+      setInventoryResults(null);
     }
     // No local state — try fetching from DB (cross-device persistence)
     setLoadingPrev(true);
@@ -434,7 +440,7 @@ function OptimizationTab({ user }) {
     (s) => statusFilter === 'all' || s.status === statusFilter
   ) ?? [];
 
-  const SUMMARY_CARDS = result ? [
+  const SUMMARY_CARDS = result?.summary ? [
     { label: 'Stockout',  value: result.summary.stockout,  color: 'text-destructive', bg: 'bg-destructive/10' },
     { label: 'Order Now', value: result.summary.order_now, color: 'text-warning',     bg: 'bg-warning/10' },
     { label: 'Watch',     value: result.summary.watch,     color: 'text-primary',     bg: 'bg-primary/10' },
@@ -559,7 +565,7 @@ function OptimizationTab({ user }) {
         </div>
       )}
 
-      {result && (
+      {result?.summary && (
         <div className="glass-card p-4 rounded-xl flex items-center justify-between">
           <div>
             <p className="text-xs text-foreground-secondary">Total units to order across all SKUs</p>

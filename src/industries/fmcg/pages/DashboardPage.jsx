@@ -41,8 +41,7 @@ const DashboardPage = () => {
     try {
       const status = await dashboardApi.getDataStatus();
       const { has_files, has_demand_data, has_inventory_data } = status.data;
-      if (!has_files) return;                              // no files uploaded yet
-      if (has_demand_data && has_inventory_data) return;  // already have results
+      if (!has_files) return;  // no files uploaded yet
       setAnalyzing(true);
       toast.loading('Analyzing your data…', { id: 'auto-analyze' });
       const resp = await dashboardApi.autoAnalyze();
@@ -70,11 +69,11 @@ const DashboardPage = () => {
     } finally {
       setAnalyzing(false);
     }
-  }, [user]);
+  }, [user, setForecastResults, setInventoryResults, queryClient]);
 
   useEffect(() => {
     runAutoAnalyze();
-  }, [user]);
+  }, [runAutoAnalyze]);
 
   const enabled = !!user;
 
