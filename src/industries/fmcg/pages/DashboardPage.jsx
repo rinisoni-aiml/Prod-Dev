@@ -36,16 +36,18 @@ const DashboardPage = () => {
   }, [user]);
 
   // On mount: check if data files exist but no results → auto-run analysis
-  const runAutoAnalyze = useCallback(async () => {
-    if (!user || analyzing) return;
+  // force=true skips the "already analyzed" check (used by Re-analyze button)
+  const runAutoAnalyze = useCallback(async (force = false) => {
+    if (!user) return;
     try {
       const status = await dashboardApi.getDataStatus();
       const { has_files, has_demand_data, has_inventory_data } = status.data;
       if (!has_files) return;  // no files uploaded yet
+      if (!force && has_demand_data && has_inventory_data) return;  // already analyzed on initial load
       setAnalyzing(true);
       toast.loading('Analyzing your data…', { id: 'auto-analyze' });
       const resp = await dashboardApi.autoAnalyze();
-      const { ran_forecast, ran_inventory, forecast_result, inventory_result } = resp.data;
+      const { ran_forecast, ran_inventory, forecast_result, inventory_result, errors } = resp.data;
       if (ran_forecast && forecast_result) {
         setForecastResults({
           allResults: forecast_result.results,
@@ -63,9 +65,13 @@ const DashboardPage = () => {
        'dashboard-inventory-snapshot', 'alerts', 'ai-insights'].forEach((key) =>
         queryClient.invalidateQueries({ queryKey: [key] })
       );
-      toast.success('Dashboard updated with your data!', { id: 'auto-analyze' });
-    } catch {
-      toast.dismiss('auto-analyze');
+      if (errors?.length) {
+        toast.error(`Analysis completed with errors: ${errors.join('; ')}`, { id: 'auto-analyze' });
+      } else {
+        toast.success('Dashboard updated with your data!', { id: 'auto-analyze' });
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Analysis failed — check your uploaded files', { id: 'auto-analyze' });
     } finally {
       setAnalyzing(false);
     }
@@ -143,7 +149,7 @@ const DashboardPage = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={runAutoAnalyze} disabled={analyzing}
+            <button onClick={() => runAutoAnalyze(true)} disabled={analyzing}
               title="Re-run analysis on latest uploaded data"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 transition-colors">
               <RefreshCw className={`h-3.5 w-3.5 ${analyzing ? 'animate-spin' : ''}`} />

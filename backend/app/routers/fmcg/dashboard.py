@@ -195,11 +195,19 @@ async def get_demand_trend(
     uid = str(current_user.id)
     try:
         # Fetch ALL demand history rows for this user (no date filter — data may be historical)
-        resp = supabase.table("demand_history") \
-            .select("date, sku, units, forecast") \
-            .eq("user_id", uid) \
-            .order("date") \
-            .execute()
+        # Try with forecast column; fall back gracefully if column doesn't exist yet
+        try:
+            resp = supabase.table("demand_history") \
+                .select("date, sku, units, forecast") \
+                .eq("user_id", uid) \
+                .order("date") \
+                .execute()
+        except Exception:
+            resp = supabase.table("demand_history") \
+                .select("date, sku, units") \
+                .eq("user_id", uid) \
+                .order("date") \
+                .execute()
 
         rows = resp.data or []
         if rows:

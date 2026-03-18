@@ -22,7 +22,7 @@ export const useFmcgStore = create((set, get) => {
   return {
     // { allResults, skuList, horizon, selectedFileId, modelType }
     forecastResults: saved.forecastResults || null,
-    // { bySku, byWarehouse, fileId }
+    // { by_sku, by_warehouse, summary, params, has_warehouse_data, has_stock_data }
     inventoryResults: saved.inventoryResults || null,
 
     setForecastResults: (data) => {

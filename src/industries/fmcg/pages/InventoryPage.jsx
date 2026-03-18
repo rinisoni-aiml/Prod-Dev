@@ -341,7 +341,10 @@ function OptimizationTab({ user }) {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [loadingPrev, setLoadingPrev] = useState(false);
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState(inventoryResults || null);
+  const [result, setResult] = useState(() => {
+    // Only use stored results if they have the correct structure (by_sku + summary)
+    return (inventoryResults?.by_sku && inventoryResults?.summary) ? inventoryResults : null;
+  });
   const [expandedWarehouses, setExpandedWarehouses] = useState({});
 
   // Form state
