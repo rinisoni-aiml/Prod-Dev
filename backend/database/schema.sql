@@ -1,11 +1,27 @@
 -- PulseIQ — Supabase Database Schema
 -- Run this in your Supabase SQL editor to create all required tables.
--- RLS (Row Level Security) is enabled on all tables so users can only see their own data.
+-- Safe to re-run: drops all tables first, then recreates from scratch.
+-- RLS (Row Level Security) is enabled on all tables.
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Drop all tables (order matters for FK constraints)
+-- ────────────────────────────────────────────────────────────────────────────
+DROP TABLE IF EXISTS chat_messages CASCADE;
+DROP TABLE IF EXISTS chat_sessions CASCADE;
+DROP TABLE IF EXISTS optimization_runs CASCADE;
+DROP TABLE IF EXISTS user_logins CASCADE;
+DROP TABLE IF EXISTS demand_history CASCADE;
+DROP TABLE IF EXISTS alerts CASCADE;
+DROP TABLE IF EXISTS contracts CASCADE;
+DROP TABLE IF EXISTS warehouses CASCADE;
+DROP TABLE IF EXISTS inventory_items CASCADE;
+DROP TABLE IF EXISTS data_files CASCADE;
+DROP TABLE IF EXISTS profiles CASCADE;
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- profiles (extends Supabase auth.users)
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS profiles (
+CREATE TABLE profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT,
   full_name TEXT,
@@ -24,7 +40,7 @@ CREATE POLICY "Users can manage own profile"
 -- ────────────────────────────────────────────────────────────────────────────
 -- data_files
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS data_files (
+CREATE TABLE data_files (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   file_name TEXT NOT NULL,
@@ -41,7 +57,7 @@ CREATE POLICY "Users can manage own files"
 -- ────────────────────────────────────────────────────────────────────────────
 -- inventory_items
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS inventory_items (
+CREATE TABLE inventory_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   sku TEXT NOT NULL,
@@ -60,12 +76,12 @@ CREATE TABLE IF NOT EXISTS inventory_items (
 ALTER TABLE inventory_items ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can manage own inventory"
   ON inventory_items FOR ALL USING (auth.uid() = user_id);
-CREATE INDEX IF NOT EXISTS idx_inventory_user_status ON inventory_items(user_id, status);
+CREATE INDEX idx_inventory_user_status ON inventory_items(user_id, status);
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- warehouses
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS warehouses (
+CREATE TABLE warehouses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   name TEXT NOT NULL,
@@ -84,7 +100,7 @@ CREATE POLICY "Users can manage own warehouses"
 -- ────────────────────────────────────────────────────────────────────────────
 -- alerts
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS alerts (
+CREATE TABLE alerts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   alert_type TEXT NOT NULL,
@@ -99,12 +115,12 @@ CREATE TABLE IF NOT EXISTS alerts (
 ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can manage own alerts"
   ON alerts FOR ALL USING (auth.uid() = user_id);
-CREATE INDEX IF NOT EXISTS idx_alerts_user_resolved ON alerts(user_id, is_resolved);
+CREATE INDEX idx_alerts_user_resolved ON alerts(user_id, is_resolved);
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- contracts
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS contracts (
+CREATE TABLE contracts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   contract_name TEXT NOT NULL,
@@ -122,9 +138,9 @@ CREATE POLICY "Users can manage own contracts"
   ON contracts FOR ALL USING (auth.uid() = created_by);
 
 -- ────────────────────────────────────────────────────────────────────────────
--- demand_history  (populated by data upload processing)
+-- demand_history  (populated by forecast pipeline)
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS demand_history (
+CREATE TABLE demand_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   date DATE NOT NULL,
@@ -137,12 +153,12 @@ CREATE TABLE IF NOT EXISTS demand_history (
 ALTER TABLE demand_history ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can manage own demand history"
   ON demand_history FOR ALL USING (auth.uid() = user_id);
-CREATE INDEX IF NOT EXISTS idx_demand_user_date ON demand_history(user_id, date);
+CREATE INDEX idx_demand_user_date ON demand_history(user_id, date);
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- chat_sessions
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS chat_sessions (
+CREATE TABLE chat_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   title TEXT,
@@ -156,7 +172,7 @@ CREATE POLICY "Users can manage own chat sessions"
 -- ────────────────────────────────────────────────────────────────────────────
 -- chat_messages
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS chat_messages (
+CREATE TABLE chat_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id UUID REFERENCES chat_sessions(id) ON DELETE CASCADE NOT NULL,
   role TEXT CHECK (role IN ('user', 'assistant')) NOT NULL,
@@ -176,14 +192,8 @@ CREATE POLICY "Users can manage own chat messages"
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- optimization_runs: stores the latest full inventory optimization result per user
--- Run this migration if upgrading an existing database:
---   ALTER TABLE inventory_items
---     ADD COLUMN IF NOT EXISTS safety_stock INTEGER DEFAULT 0,
---     ADD COLUMN IF NOT EXISTS eoq INTEGER DEFAULT 0,
---     ADD COLUMN IF NOT EXISTS reorder_point INTEGER DEFAULT 0,
---     ADD COLUMN IF NOT EXISTS suggested_order_qty INTEGER DEFAULT 0;
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS optimization_runs (
+CREATE TABLE optimization_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
   file_id TEXT,
@@ -203,7 +213,7 @@ CREATE POLICY "Users can manage own optimization runs"
 -- ────────────────────────────────────────────────────────────────────────────
 -- user_logins (optional — for analytics)
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS user_logins (
+CREATE TABLE user_logins (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT,
