@@ -52,6 +52,10 @@ export const dashboardApi = {
   getDemandTrend: (params) => api.get('/api/fmcg/dashboard/demand-trend', { params }),
   getTopSKUs: () => api.get('/api/fmcg/dashboard/top-skus'),
   getInventorySnapshot: () => api.get('/api/fmcg/dashboard/inventory-snapshot'),
+  // Check whether data files exist and whether analysis results are present
+  getDataStatus: () => api.get('/api/fmcg/dashboard/data-status'),
+  // Run forecast + optimization on latest uploaded files (self-healing on first load)
+  autoAnalyze: () => api.post('/api/fmcg/dashboard/auto-analyze'),
 };
 
 // ── FMCG: Forecasting ─────────────────────────────────────────────────────────

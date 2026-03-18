@@ -6,6 +6,157 @@ from datetime import datetime, timedelta
 router = APIRouter()
 
 
+@router.get("/data-status")
+async def get_data_status(current_user=Depends(get_current_user)):
+    """
+    Returns whether the user has uploaded files and whether analysis results exist.
+    Used by the dashboard to decide whether to trigger auto-analysis.
+    """
+    uid = str(current_user.id)
+    try:
+        # Check data files — get latest of each purpose
+        files_resp = supabase.table("data_files").select("id, column_mapping, created_at") \
+            .eq("user_id", uid).order("created_at", desc=True).limit(50).execute()
+        files = files_resp.data or []
+
+        latest_forecast_file = None
+        latest_inventory_file = None
+        for f in files:
+            cm = f.get("column_mapping") or {}
+            purpose = cm.get("__purpose__", "forecasting")
+            if purpose == "forecasting" and not latest_forecast_file:
+                latest_forecast_file = f["id"]
+            if purpose == "inventory" and not latest_inventory_file:
+                latest_inventory_file = f["id"]
+        # Any untagged file can serve as fallback for both
+        if not latest_forecast_file and files:
+            latest_forecast_file = files[0]["id"]
+        if not latest_inventory_file and files:
+            latest_inventory_file = files[0]["id"]
+
+        # Check if results already exist
+        dh_resp = supabase.table("demand_history").select("id").eq("user_id", uid).limit(1).execute()
+        inv_resp = supabase.table("inventory_items").select("id").eq("user_id", uid).limit(1).execute()
+
+        return {
+            "has_files": len(files) > 0,
+            "has_demand_data": len(dh_resp.data or []) > 0,
+            "has_inventory_data": len(inv_resp.data or []) > 0,
+            "latest_forecast_file_id": latest_forecast_file,
+            "latest_inventory_file_id": latest_inventory_file,
+        }
+    except Exception:
+        return {
+            "has_files": False,
+            "has_demand_data": False,
+            "has_inventory_data": False,
+            "latest_forecast_file_id": None,
+            "latest_inventory_file_id": None,
+        }
+
+
+@router.post("/auto-analyze")
+async def auto_analyze(current_user=Depends(get_current_user)):
+    """
+    Run forecast + inventory optimization on the user's latest uploaded files.
+    Called by the dashboard when data files exist but no results are present yet.
+    Returns a summary of what was run.
+    """
+    uid = str(current_user.id)
+    from app.services.fmcg.forecast_service import (
+        parse_file_to_dataframe, run_all_skus_forecast,
+    )
+    from app.services.fmcg.inventory_optimizer import (
+        parse_file_for_optimization, run_inventory_optimization,
+    )
+    from app.routers.fmcg.forecasting import _persist_demand_history
+    from app.routers.fmcg.inventory import _persist_inventory_items, STATUS_MAP
+    from datetime import timezone
+
+    ran_forecast = False
+    ran_inventory = False
+    forecast_result = None
+    inventory_result = None
+    errors = []
+
+    try:
+        # Get latest files
+        files_resp = supabase.table("data_files").select("*") \
+            .eq("user_id", uid).order("created_at", desc=True).limit(20).execute()
+        files = files_resp.data or []
+
+        latest_forecast_file = None
+        latest_inventory_file = None
+        for f in files:
+            cm = f.get("column_mapping") or {}
+            purpose = cm.get("__purpose__", "forecasting")
+            if purpose in ("forecasting", "") and not latest_forecast_file:
+                latest_forecast_file = f
+            if purpose == "inventory" and not latest_inventory_file:
+                latest_inventory_file = f
+        if not latest_forecast_file and files:
+            latest_forecast_file = files[0]
+        if not latest_inventory_file and files:
+            latest_inventory_file = files[0]
+
+        # ── Run forecast ──────────────────────────────────────────────────────
+        if latest_forecast_file:
+            try:
+                fb = supabase.storage.from_("data-files").download(latest_forecast_file["storage_path"])
+                df = parse_file_to_dataframe(fb, latest_forecast_file["file_name"],
+                                              latest_forecast_file.get("column_mapping") or {})
+                run_result = run_all_skus_forecast(df, 30)
+                _persist_demand_history(uid, run_result.get("results", {}))
+                forecast_result = {
+                    "skus": run_result.get("skus", []),
+                    "results": run_result.get("results", {}),
+                }
+                ran_forecast = True
+            except Exception as e:
+                errors.append(f"forecast: {str(e)}")
+
+        # ── Run inventory optimization ────────────────────────────────────────
+        if latest_inventory_file:
+            try:
+                ib = supabase.storage.from_("data-files").download(latest_inventory_file["storage_path"])
+                df_inv = parse_file_for_optimization(ib, latest_inventory_file["file_name"],
+                                                      latest_inventory_file.get("column_mapping") or {})
+                inv_result = run_inventory_optimization(df=df_inv, lead_time_days=7,
+                                                         service_level=0.95, order_cost=0, holding_cost_pct=0)
+                _persist_inventory_items(uid, inv_result.get("by_sku", []), inv_result.get("by_warehouse", []))
+                # Store in optimization_runs (best-effort)
+                try:
+                    from datetime import timezone as tz
+                    supabase.table("optimization_runs").upsert({
+                        "user_id": uid,
+                        "file_id": latest_inventory_file["id"],
+                        "params": inv_result.get("params"),
+                        "summary": inv_result.get("summary"),
+                        "by_sku": inv_result.get("by_sku"),
+                        "by_warehouse": inv_result.get("by_warehouse"),
+                        "has_warehouse_data": inv_result.get("has_warehouse_data", False),
+                        "has_stock_data": inv_result.get("has_stock_data", False),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }, on_conflict="user_id").execute()
+                except Exception:
+                    pass
+                inventory_result = inv_result
+                ran_inventory = True
+            except Exception as e:
+                errors.append(f"inventory: {str(e)}")
+
+    except Exception as e:
+        errors.append(f"setup: {str(e)}")
+
+    return {
+        "ran_forecast": ran_forecast,
+        "ran_inventory": ran_inventory,
+        "forecast_result": forecast_result,
+        "inventory_result": inventory_result,
+        "errors": errors,
+    }
+
+
 @router.get("/kpis")
 async def get_kpis(current_user=Depends(get_current_user)):
     """Compute KPIs from real inventory and warehouse data."""
@@ -40,42 +191,39 @@ async def get_demand_trend(
     days: int = Query(30, ge=7, le=365),
     current_user=Depends(get_current_user),
 ):
-    """Return daily demand from demand_history table (All Products aggregate + forecast)."""
+    """Return daily demand aggregated from demand_history (all SKUs summed by date)."""
     uid = str(current_user.id)
     try:
-        # First try "All Products" aggregate rows (set by forecast run)
+        # Fetch ALL demand history rows for this user (no date filter — data may be historical)
         resp = supabase.table("demand_history") \
-            .select("date, units, forecast") \
+            .select("date, sku, units, forecast") \
             .eq("user_id", uid) \
-            .eq("sku", "All Products") \
             .order("date") \
             .execute()
-        if resp.data:
-            rows = resp.data
-            # Return last `days` historical + all forecast rows
-            hist = [r for r in rows if r.get("units") is not None]
-            fcast = [r for r in rows if r.get("units") is None]
-            combined = hist[-days:] + fcast
-            return combined
 
-        # Fallback: aggregate all per-SKU rows by date (most recent `days` dates)
-        resp2 = supabase.table("demand_history") \
-            .select("date, units") \
-            .eq("user_id", uid) \
-            .order("date", desc=True) \
-            .limit(days * 20) \
-            .execute()
-        if resp2.data:
-            agg: dict = {}
-            for r in resp2.data:
+        rows = resp.data or []
+        if rows:
+            # Aggregate all SKUs by date
+            date_agg: dict = {}
+            for r in rows:
                 d = r["date"]
-                agg[d] = agg.get(d, 0) + (r.get("units") or 0)
-            dates = sorted(agg.keys())[-days:]
-            return [{"date": d, "units": agg[d], "forecast": None} for d in dates]
+                if d not in date_agg:
+                    date_agg[d] = {"date": d, "units": 0, "forecast": None}
+                units = r.get("units") or 0
+                date_agg[d]["units"] += units
+                if r.get("forecast") is not None:
+                    date_agg[d]["forecast"] = (date_agg[d]["forecast"] or 0) + r["forecast"]
+
+            sorted_dates = sorted(date_agg.keys())
+            # Return last `days` historical points + any forecast points beyond them
+            hist_dates = [d for d in sorted_dates if date_agg[d]["units"] > 0]
+            fc_dates = [d for d in sorted_dates if date_agg[d]["units"] == 0 and date_agg[d]["forecast"]]
+            result_dates = hist_dates[-days:] + fc_dates
+            return [date_agg[d] for d in result_dates]
     except Exception:
         pass
 
-    # Return empty scaffolding so charts render gracefully
+    # Empty scaffolding so chart renders gracefully
     base = datetime.utcnow() - timedelta(days=days)
     return [
         {"date": (base + timedelta(days=i)).strftime("%Y-%m-%d"), "units": 0, "forecast": None}

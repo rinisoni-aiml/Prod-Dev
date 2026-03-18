@@ -20,53 +20,54 @@ router = APIRouter()
 def _persist_demand_history(uid: str, results: dict):
     """Save per-SKU historical data + All Products aggregate (with forecast) to demand_history."""
     try:
-        rows = []
+        hist_rows = []   # units only — always safe to insert
+        fc_rows = []     # forecast future — separate batch so failure is isolated
+
         for sku_name, result in results.items():
             if result.get("error"):
                 continue
+
+            # Historical actual demand — no forecast field to avoid column-missing errors
+            for point in result.get("historical", []):
+                date = point.get("date")
+                actual = point.get("actual")
+                if date and actual is not None:
+                    hist_rows.append({
+                        "user_id": uid,
+                        "date": date,
+                        "sku": sku_name,
+                        "units": int(actual),
+                    })
+
+            # Future forecast rows — only for All Products aggregate
             if sku_name == "All Products":
-                # Save aggregate historical (actual demand)
-                for point in result.get("historical", []):
-                    date = point.get("date")
-                    actual = point.get("actual")
-                    if date and actual is not None:
-                        rows.append({
-                            "user_id": uid,
-                            "date": date,
-                            "sku": "All Products",
-                            "units": int(actual),
-                            "forecast": None,
-                        })
-                # Save aggregate forecast (future demand)
                 for point in result.get("forecast", []):
                     date = point.get("date")
                     fc = point.get("forecast")
                     if date and fc is not None:
-                        rows.append({
+                        fc_rows.append({
                             "user_id": uid,
                             "date": date,
                             "sku": "All Products",
-                            "units": None,
+                            "units": 0,
                             "forecast": int(fc),
                         })
-            else:
-                # Save per-SKU historical for top-SKU charts
-                for point in result.get("historical", []):
-                    date = point.get("date")
-                    actual = point.get("actual")
-                    if date and actual is not None:
-                        rows.append({
-                            "user_id": uid,
-                            "date": date,
-                            "sku": sku_name,
-                            "units": int(actual),
-                            "forecast": None,
-                        })
-        if not rows:
+
+        if not hist_rows:
             return
+
+        # Clear existing data and insert historical rows
         supabase.table("demand_history").delete().eq("user_id", uid).execute()
-        for i in range(0, len(rows), 500):
-            supabase.table("demand_history").insert(rows[i:i + 500]).execute()
+        for i in range(0, len(hist_rows), 500):
+            supabase.table("demand_history").insert(hist_rows[i:i + 500]).execute()
+
+        # Insert forecast rows separately — silently skip if forecast column missing
+        if fc_rows:
+            try:
+                for i in range(0, len(fc_rows), 500):
+                    supabase.table("demand_history").insert(fc_rows[i:i + 500]).execute()
+            except Exception:
+                pass  # forecast column may not exist in older DB — historical data is safe
     except Exception:
         pass
 

@@ -1,14 +1,16 @@
 import { motion } from 'framer-motion';
-import { Package, AlertTriangle, Target, Activity, TrendingUp, ArrowRight, X, Sparkles } from 'lucide-react';
+import { Package, AlertTriangle, Target, Activity, TrendingUp, ArrowRight, X, Sparkles, Loader2, RefreshCw } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { useInView } from 'react-intersection-observer';
 import CountUp from 'react-countup';
-import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { dashboardApi, alertsApi, aiApi } from '@/lib/api';
+import { useFmcgStore } from '@/stores/fmcgStore';
 import { useChatStore } from '@/stores/chatStore';
 import { fetchDataFiles } from '@/lib/dataFiles';
+import toast from 'react-hot-toast';
 
 const iconMap = { Package, AlertTriangle, Target, Activity };
 
@@ -21,13 +23,57 @@ const SNAPSHOT_COLORS = {
 
 const DashboardPage = () => {
   const { profile, user } = useAuthStore();
+  const { setForecastResults, setInventoryResults } = useFmcgStore();
+  const queryClient = useQueryClient();
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const { openChat } = useChatStore();
   const [fileCount, setFileCount] = useState(0);
 
   useEffect(() => {
     if (!user) return;
     fetchDataFiles(user.id).then((files) => setFileCount(files.length)).catch(() => {});
+  }, [user]);
+
+  // On mount: check if data files exist but no results → auto-run analysis
+  const runAutoAnalyze = useCallback(async () => {
+    if (!user || analyzing) return;
+    try {
+      const status = await dashboardApi.getDataStatus();
+      const { has_files, has_demand_data, has_inventory_data } = status.data;
+      if (!has_files) return;                              // no files uploaded yet
+      if (has_demand_data && has_inventory_data) return;  // already have results
+      setAnalyzing(true);
+      toast.loading('Analyzing your data…', { id: 'auto-analyze' });
+      const resp = await dashboardApi.autoAnalyze();
+      const { ran_forecast, ran_inventory, forecast_result, inventory_result } = resp.data;
+      if (ran_forecast && forecast_result) {
+        setForecastResults({
+          allResults: forecast_result.results,
+          skuList: forecast_result.skus,
+          horizon: 30,
+          selectedFileId: null,
+          modelType: forecast_result.results?.['All Products']?.model || null,
+        });
+      }
+      if (ran_inventory && inventory_result) {
+        setInventoryResults(inventory_result);
+      }
+      // Refresh all dashboard queries
+      ['dashboard-kpis', 'dashboard-demand-trend', 'dashboard-top-skus',
+       'dashboard-inventory-snapshot', 'alerts', 'ai-insights'].forEach((key) =>
+        queryClient.invalidateQueries({ queryKey: [key] })
+      );
+      toast.success('Dashboard updated with your data!', { id: 'auto-analyze' });
+    } catch {
+      toast.dismiss('auto-analyze');
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    runAutoAnalyze();
   }, [user]);
 
   const enabled = !!user;
@@ -79,6 +125,15 @@ const DashboardPage = () => {
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 py-6 space-y-6">
+
+      {analyzing && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          className="glass-card p-4 rounded-xl flex items-center gap-3 border border-primary/20">
+          <Loader2 className="h-5 w-5 text-primary animate-spin flex-shrink-0" />
+          <p className="text-sm text-foreground">Analyzing your uploaded data — dashboard will update shortly…</p>
+        </motion.div>
+      )}
+
       {!bannerDismissed && (
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
           className="glass-card p-5 rounded-xl flex items-center justify-between">
@@ -88,7 +143,15 @@ const DashboardPage = () => {
               {profile?.company_name || 'Company'} · {fileCount} data source{fileCount !== 1 ? 's' : ''} uploaded
             </p>
           </div>
-          <button onClick={() => setBannerDismissed(true)} className="text-foreground-secondary hover:text-foreground"><X className="h-5 w-5" /></button>
+          <div className="flex items-center gap-2">
+            <button onClick={runAutoAnalyze} disabled={analyzing}
+              title="Re-run analysis on latest uploaded data"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 transition-colors">
+              <RefreshCw className={`h-3.5 w-3.5 ${analyzing ? 'animate-spin' : ''}`} />
+              {analyzing ? 'Analyzing…' : 'Re-analyze'}
+            </button>
+            <button onClick={() => setBannerDismissed(true)} className="text-foreground-secondary hover:text-foreground"><X className="h-5 w-5" /></button>
+          </div>
         </motion.div>
       )}
 
