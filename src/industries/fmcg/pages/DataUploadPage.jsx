@@ -376,7 +376,7 @@ const DataUploadPage = () => {
                       <p className="text-sm font-medium text-foreground">{file.file_name}</p>
                       <p className="text-xs text-foreground-secondary">
                         {file.row_count ? `${file.row_count.toLocaleString()} rows · ` : ''}
-                        {file.file_type?.toUpperCase()} · {formatSize(file.file_size)} · {new Date(file.uploaded_at).toLocaleDateString()}
+                        {file.file_name?.split('.').pop().toUpperCase()} · {formatSize(file.file_size)} · {new Date(file.created_at).toLocaleDateString()}
                       </p>
                     </div>
                   </div>

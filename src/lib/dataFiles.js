@@ -4,7 +4,6 @@ import { supabase } from './supabase';
  * Upload a file to Supabase Storage and save metadata to data_files table.
  */
 export const uploadDataFile = async (userId, file, columnMapping = {}, rowCount = 0) => {
-  const ext = file.name.split('.').pop();
   const storagePath = `${userId}/${Date.now()}_${file.name}`;
 
   // Upload to Supabase Storage
@@ -19,10 +18,8 @@ export const uploadDataFile = async (userId, file, columnMapping = {}, rowCount 
     user_id: userId,
     file_name: file.name,
     file_size: file.size,
-    file_type: ext,
     storage_path: storagePath,
     row_count: rowCount,
-    status: 'ready',
     column_mapping: columnMapping,
   }).select().single();
 
@@ -38,7 +35,7 @@ export const fetchDataFiles = async (userId) => {
     .from('data_files')
     .select('*')
     .eq('user_id', userId)
-    .order('uploaded_at', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (error) throw error;
   return data || [];
