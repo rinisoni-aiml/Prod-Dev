@@ -175,6 +175,32 @@ CREATE POLICY "Users can manage own chat messages"
   );
 
 -- ────────────────────────────────────────────────────────────────────────────
+-- optimization_runs: stores the latest full inventory optimization result per user
+-- Run this migration if upgrading an existing database:
+--   ALTER TABLE inventory_items
+--     ADD COLUMN IF NOT EXISTS safety_stock INTEGER DEFAULT 0,
+--     ADD COLUMN IF NOT EXISTS eoq INTEGER DEFAULT 0,
+--     ADD COLUMN IF NOT EXISTS reorder_point INTEGER DEFAULT 0,
+--     ADD COLUMN IF NOT EXISTS suggested_order_qty INTEGER DEFAULT 0;
+-- ────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS optimization_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  file_id TEXT,
+  params JSONB,
+  summary JSONB,
+  by_sku JSONB,
+  by_warehouse JSONB,
+  has_warehouse_data BOOLEAN DEFAULT FALSE,
+  has_stock_data BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE optimization_runs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage own optimization runs"
+  ON optimization_runs FOR ALL USING (auth.uid() = user_id);
+
+-- ────────────────────────────────────────────────────────────────────────────
 -- user_logins (optional — for analytics)
 -- ────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_logins (

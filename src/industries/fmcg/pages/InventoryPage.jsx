@@ -5,11 +5,12 @@ import {
   RadialBarChart, RadialBar,
   ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts';
-import { Warehouse, Loader2, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { Warehouse, Loader2, ChevronDown, ChevronRight, AlertTriangle, RefreshCw } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { inventoryApi } from '@/lib/api';
 import { fetchDataFiles } from '@/lib/dataFiles';
+import { useFmcgStore } from '@/stores/fmcgStore';
 import toast from 'react-hot-toast';
 
 const SNAPSHOT_COLORS = {
@@ -332,11 +333,15 @@ function ABCTab({ abcAnalysis }) {
 // ─── Optimization tab ─────────────────────────────────────────────────────────
 
 function OptimizationTab({ user }) {
+  const { inventoryResults, setInventoryResults } = useFmcgStore();
+  const queryClient = useQueryClient();
+
   const [dataFiles, setDataFiles] = useState(null);  // null = not loaded yet
   const [fileId, setFileId] = useState('');
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [loadingPrev, setLoadingPrev] = useState(false);
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(inventoryResults || null);
   const [expandedWarehouses, setExpandedWarehouses] = useState({});
 
   // Form state
@@ -352,7 +357,6 @@ function OptimizationTab({ user }) {
     setLoadingFiles(true);
     try {
       const files = await fetchDataFiles(user.id);
-      // Show files tagged for inventory, plus any legacy untagged files
       const filtered = files.filter(
         (f) => !f.column_mapping?.__purpose__ || f.column_mapping.__purpose__ === 'inventory'
       );
@@ -366,13 +370,38 @@ function OptimizationTab({ user }) {
     }
   };
 
-  // Load files on first render of tab
-  useEffect(() => { ensureFilesLoaded(); }, []);
+  // On mount: restore from Zustand (localStorage) or fetch from DB
+  useEffect(() => {
+    ensureFilesLoaded();
+    if (inventoryResults) {
+      setResult(inventoryResults);
+      // Pre-fill params from stored result if available
+      if (inventoryResults.params) {
+        setLeadTime(inventoryResults.params.lead_time_days ?? 7);
+        setServiceLevel(inventoryResults.params.service_level ?? 0.95);
+      }
+      return;
+    }
+    // No local state — try fetching from DB (cross-device persistence)
+    setLoadingPrev(true);
+    inventoryApi.getLatestOptimization()
+      .then((resp) => {
+        if (resp.data) {
+          setResult(resp.data);
+          setInventoryResults(resp.data);
+          if (resp.data.params) {
+            setLeadTime(resp.data.params.lead_time_days ?? 7);
+            setServiceLevel(resp.data.params.service_level ?? 0.95);
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingPrev(false));
+  }, []);
 
   const handleRun = async () => {
     if (!fileId) { toast.error('Select a data file first'); return; }
     setRunning(true);
-    setResult(null);
     setExpandedWarehouses({});
     try {
       const resp = await inventoryApi.runOptimization({
@@ -383,6 +412,14 @@ function OptimizationTab({ user }) {
         holding_cost_pct: parseFloat(holdingCostPct) / 100 || 0,
       });
       setResult(resp.data);
+      setInventoryResults(resp.data);
+      // Invalidate dashboard and inventory queries so they reflect new data
+      queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-snapshot'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-warehouses'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-reorder'] });
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Optimization failed');
     } finally {
@@ -404,10 +441,11 @@ function OptimizationTab({ user }) {
     { label: 'OK',        value: result.summary.ok,        color: 'text-success',     bg: 'bg-success/10' },
   ] : [];
 
-  if (loadingFiles) {
+  if (loadingFiles || loadingPrev) {
     return (
-      <div className="min-h-[40vh] flex items-center justify-center">
+      <div className="min-h-[40vh] flex items-center justify-center gap-3">
         <Loader2 className="h-6 w-6 text-primary animate-spin" />
+        {loadingPrev && <p className="text-sm text-foreground-secondary">Restoring previous analysis…</p>}
       </div>
     );
   }
@@ -478,8 +516,8 @@ function OptimizationTab({ user }) {
         <div className="flex items-center gap-3 mt-4">
           <button onClick={handleRun} disabled={running || !fileId}
             className="gradient-brand text-primary-foreground px-5 py-2.5 rounded-lg text-sm font-semibold hover-lift disabled:opacity-50 flex items-center gap-2">
-            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {running ? 'Optimizing…' : 'Run Optimization'}
+            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {running ? 'Optimizing…' : result ? 'Re-run Analysis' : 'Run Optimization'}
           </button>
           {result && !result.has_stock_data && (
             <p className="text-xs text-warning flex items-center gap-1">

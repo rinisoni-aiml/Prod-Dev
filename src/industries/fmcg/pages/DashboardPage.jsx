@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { Package, AlertTriangle, Target, Activity, TrendingUp, ArrowRight, X, Sparkles } from 'lucide-react';
-import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { useInView } from 'react-intersection-observer';
 import CountUp from 'react-countup';
 import { useState, useEffect } from 'react';
@@ -121,7 +121,7 @@ const DashboardPage = () => {
 
       <div className="grid lg:grid-cols-5 gap-4">
         <div className="lg:col-span-3 glass-card p-5 rounded-xl">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Demand Trend (30 days)</h3>
+          <h3 className="text-sm font-semibold text-foreground mb-4">Demand Trend</h3>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={demandTrend}>
               <defs>
@@ -129,12 +129,18 @@ const DashboardPage = () => {
                   <stop offset="0%" stopColor="hsl(217, 91%, 60%)" stopOpacity={0.3} />
                   <stop offset="100%" stopColor="hsl(217, 91%, 60%)" stopOpacity={0} />
                 </linearGradient>
+                <linearGradient id="gradientForecast" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(187, 96%, 42%)" stopOpacity={0.2} />
+                  <stop offset="100%" stopColor="hsl(187, 96%, 42%)" stopOpacity={0} />
+                </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="hsl(var(--foreground-secondary))" tickFormatter={(v) => v.slice(5)} />
               <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--foreground-secondary))" />
               <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
-              <Area type="monotone" dataKey="units" stroke="hsl(217, 91%, 60%)" fill="url(#gradientArea)" strokeWidth={2} />
+              <Legend wrapperStyle={{ fontSize: '11px' }} />
+              <Area type="monotone" dataKey="units" name="Actual" stroke="hsl(217, 91%, 60%)" fill="url(#gradientArea)" strokeWidth={2} connectNulls={false} />
+              <Area type="monotone" dataKey="forecast" name="Forecast" stroke="hsl(187, 96%, 42%)" fill="url(#gradientForecast)" strokeWidth={2} strokeDasharray="4 2" connectNulls={false} />
             </AreaChart>
           </ResponsiveContainer>
         </div>

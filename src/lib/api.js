@@ -77,6 +77,8 @@ export const inventoryApi = {
   getABCAnalysis: () => api.get('/api/fmcg/inventory/abc-analysis'),
   // Run inventory optimization (Safety Stock, ROP, EOQ) from an uploaded file
   runOptimization: (body) => api.post('/api/fmcg/inventory/optimize', body),
+  // Fetch the latest stored optimization result (persisted across sessions)
+  getLatestOptimization: () => api.get('/api/fmcg/inventory/latest-optimization'),
 };
 
 // ── FMCG: Contracts ───────────────────────────────────────────────────────────

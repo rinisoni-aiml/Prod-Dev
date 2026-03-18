@@ -40,25 +40,45 @@ async def get_demand_trend(
     days: int = Query(30, ge=7, le=365),
     current_user=Depends(get_current_user),
 ):
-    """Return daily demand from demand_history table (populated on data upload)."""
+    """Return daily demand from demand_history table (All Products aggregate + forecast)."""
     uid = str(current_user.id)
     try:
-        since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        # First try "All Products" aggregate rows (set by forecast run)
         resp = supabase.table("demand_history") \
             .select("date, units, forecast") \
             .eq("user_id", uid) \
-            .gte("date", since) \
+            .eq("sku", "All Products") \
             .order("date") \
             .execute()
         if resp.data:
-            return resp.data
+            rows = resp.data
+            # Return last `days` historical + all forecast rows
+            hist = [r for r in rows if r.get("units") is not None]
+            fcast = [r for r in rows if r.get("units") is None]
+            combined = hist[-days:] + fcast
+            return combined
+
+        # Fallback: aggregate all per-SKU rows by date (most recent `days` dates)
+        resp2 = supabase.table("demand_history") \
+            .select("date, units") \
+            .eq("user_id", uid) \
+            .order("date", desc=True) \
+            .limit(days * 20) \
+            .execute()
+        if resp2.data:
+            agg: dict = {}
+            for r in resp2.data:
+                d = r["date"]
+                agg[d] = agg.get(d, 0) + (r.get("units") or 0)
+            dates = sorted(agg.keys())[-days:]
+            return [{"date": d, "units": agg[d], "forecast": None} for d in dates]
     except Exception:
         pass
 
     # Return empty scaffolding so charts render gracefully
     base = datetime.utcnow() - timedelta(days=days)
     return [
-        {"date": (base + timedelta(days=i)).strftime("%Y-%m-%d"), "units": 0, "forecast": 0}
+        {"date": (base + timedelta(days=i)).strftime("%Y-%m-%d"), "units": 0, "forecast": None}
         for i in range(days)
     ]
 

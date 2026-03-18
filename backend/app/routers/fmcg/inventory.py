@@ -6,21 +6,24 @@ from app.services.fmcg.inventory_optimizer import (
     parse_file_for_optimization,
     run_inventory_optimization,
 )
+from datetime import datetime, timezone
 
 router = APIRouter()
 
 
-# ─── DB persistence helper ────────────────────────────────────────────────────
+# ─── DB persistence helpers ───────────────────────────────────────────────────
 
-def _persist_inventory_items(uid: str, by_sku: list):
-    """Save inventory optimization results to inventory_items table."""
-    STATUS_MAP = {
-        "stockout": "stockout",
-        "order_now": "low_stock",
-        "watch": "low_stock",
-        "overstock": "overstock",
-        "ok": "optimal",
-    }
+STATUS_MAP = {
+    "stockout": "stockout",
+    "order_now": "low_stock",
+    "watch": "low_stock",
+    "overstock": "overstock",
+    "ok": "optimal",
+}
+
+
+def _persist_inventory_items(uid: str, by_sku: list, by_warehouse: list = None):
+    """Save inventory optimization results to inventory_items and warehouses tables."""
     try:
         items = []
         for item in by_sku:
@@ -31,15 +34,79 @@ def _persist_inventory_items(uid: str, by_sku: list):
                 "user_id": uid,
                 "sku": sku,
                 "product_name": sku,
-                "current_stock": item.get("current_stock", 0),
-                "daily_avg_demand": item.get("avg_daily_demand", 0),
-                "days_left": item.get("days_remaining"),
+                "current_stock": int(item.get("current_stock") or 0),
+                "reorder_point": int(item.get("reorder_point") or 0),
+                "daily_avg_demand": float(item.get("avg_daily_demand") or 0),
+                "days_left": float(item.get("days_remaining") or 0) if item.get("days_remaining") is not None else None,
                 "status": STATUS_MAP.get(item.get("status", "ok"), "optimal"),
             })
-        if not items:
-            return
-        supabase.table("inventory_items").delete().eq("user_id", uid).execute()
-        supabase.table("inventory_items").insert(items).execute()
+        if items:
+            supabase.table("inventory_items").delete().eq("user_id", uid).execute()
+            supabase.table("inventory_items").insert(items).execute()
+    except Exception:
+        pass
+
+    # Populate warehouses table
+    if by_warehouse:
+        try:
+            wh_rows = []
+            for wh in by_warehouse:
+                wh_name = wh.get("warehouse")
+                if not wh_name:
+                    continue
+                skus = wh.get("skus", [])
+                summary = wh.get("summary", {})
+                total_skus = len(skus)
+                stockouts = summary.get("stockout", 0)
+                fill_rate = round((total_skus - stockouts) / max(total_skus, 1) * 100, 1)
+                wh_status = "critical" if stockouts > 0 else ("warning" if summary.get("order_now", 0) > 0 else "good")
+                wh_rows.append({
+                    "user_id": uid,
+                    "name": wh_name,
+                    "total_skus": total_skus,
+                    "stockouts": stockouts,
+                    "fill_rate": fill_rate,
+                    "status": wh_status,
+                })
+            if wh_rows:
+                supabase.table("warehouses").delete().eq("user_id", uid).execute()
+                supabase.table("warehouses").insert(wh_rows).execute()
+        except Exception:
+            pass
+
+    # Auto-generate alerts for critical inventory issues
+    try:
+        alerts = []
+        for item in by_sku:
+            status = item.get("status")
+            sku = item.get("sku", "")
+            days = item.get("days_remaining", 0) or 0
+            if status == "stockout":
+                alerts.append({
+                    "user_id": uid,
+                    "alert_type": "stockout",
+                    "severity": "critical",
+                    "message": f"SKU {sku} is out of stock — immediate replenishment required.",
+                    "sku": sku,
+                    "is_resolved": False,
+                })
+            elif status == "order_now":
+                alerts.append({
+                    "user_id": uid,
+                    "alert_type": "low_stock",
+                    "severity": "high",
+                    "message": f"SKU {sku} needs immediate reorder ({round(days, 1)}d of stock remaining).",
+                    "sku": sku,
+                    "is_resolved": False,
+                })
+        if alerts:
+            # Clear old auto-generated inventory alerts before inserting new ones
+            supabase.table("alerts") \
+                .delete() \
+                .eq("user_id", uid) \
+                .in_("alert_type", ["stockout", "low_stock"]) \
+                .execute()
+            supabase.table("alerts").insert(alerts).execute()
     except Exception:
         pass
 
@@ -101,8 +168,25 @@ async def optimize_inventory(body: OptimizeRequest, current_user=Depends(get_cur
             order_cost=body.order_cost,
             holding_cost_pct=body.holding_cost_pct,
         )
-        # Persist results to inventory_items for dashboard (best-effort)
-        _persist_inventory_items(uid, result.get("by_sku", []))
+        # Persist results to inventory_items, warehouses, and alerts (best-effort)
+        _persist_inventory_items(uid, result.get("by_sku", []), result.get("by_warehouse", []))
+
+        # Store full optimization result for cross-session persistence
+        try:
+            supabase.table("optimization_runs").upsert({
+                "user_id": uid,
+                "file_id": body.file_id,
+                "params": result.get("params"),
+                "summary": result.get("summary"),
+                "by_sku": result.get("by_sku"),
+                "by_warehouse": result.get("by_warehouse"),
+                "has_warehouse_data": result.get("has_warehouse_data", False),
+                "has_stock_data": result.get("has_stock_data", False),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }, on_conflict="user_id").execute()
+        except Exception:
+            pass
+
         return result
 
     except HTTPException:
@@ -111,6 +195,25 @@ async def optimize_inventory(body: OptimizeRequest, current_user=Depends(get_cur
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Optimization failed: {str(e)}")
+
+
+@router.get("/latest-optimization")
+async def get_latest_optimization(current_user=Depends(get_current_user)):
+    """Return the most recent inventory optimization result for this user."""
+    uid = str(current_user.id)
+    try:
+        resp = (
+            supabase.table("optimization_runs")
+            .select("*")
+            .eq("user_id", uid)
+            .single()
+            .execute()
+        )
+        if resp.data:
+            return resp.data
+        return None
+    except Exception:
+        return None
 
 
 @router.get("/overview")
