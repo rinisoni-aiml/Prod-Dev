@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev]
+
+jobs:
+  # ── Frontend: lint + test ──────────────────────────────────────────────────
+  frontend:
+    name: Frontend (lint + test)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+  # ── Backend: lint ──────────────────────────────────────────────────────────
+  backend:
+    name: Backend (lint)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          pip install --upgrade pip
+          pip install ruff
+
+      - name: Lint with ruff
+        working-directory: backend
+        run: ruff check app/
+
+  # ── Verify no secrets accidentally committed ───────────────────────────────
+  secrets-check:
+    name: Check no .env files committed
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail if .env files are tracked
+        run: |
+          if git ls-files | grep -E '^\.env$|^backend/\.env$'; then
+            echo "ERROR: .env file is tracked by git. Remove it and add to .gitignore."
+            exit 1
+          fi
+          echo "No .env files tracked."

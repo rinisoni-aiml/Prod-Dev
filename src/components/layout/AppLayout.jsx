@@ -21,7 +21,7 @@ const AppLayout = () => {
   const { profile, logout } = useAuthStore();
   const navigate = useNavigate();
 
-  const handleLogout = () => { localStorage.removeItem('pulseiq-token'); logout(); navigate('/'); };
+  const handleLogout = async () => { await logout(); navigate('/'); };
   const lastUpdated = new Date();
   const timeAgo = Math.floor((Date.now() - lastUpdated.getTime()) / 60000);
 

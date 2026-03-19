@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Upload, AlertCircle } from 'lucide-react';
 import Logo from '@/components/Logo';
 import { useAuthStore } from '@/stores/authStore';
+import { supabase } from '@/lib/supabase';
+import { uploadDataFile } from '@/lib/dataFiles';
 import toast from 'react-hot-toast';
 import SchemaMapping, { DEFAULT_PLATFORM_FIELDS, autoMapHeaders, parseCSVPreview } from '@/components/data/SchemaMapping';
 
@@ -17,7 +19,7 @@ const OnboardingPage = () => {
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [processing, setProcessing] = useState(false);
   const navigate = useNavigate();
-  const { setProfile, profile } = useAuthStore();
+  const { user, setProfile } = useAuthStore();
 
   const roles = ['Founder/CEO', 'Operations Head', 'Supply Chain Manager', 'Data Analyst', 'Other'];
 
@@ -31,18 +33,12 @@ const OnboardingPage = () => {
   ];
 
   const handleStep1 = () => {
-    if (!fullName || !companyName || !userRole) {
-      toast.error('Please fill in all fields');
-      return;
-    }
+    if (!fullName || !companyName || !userRole) { toast.error('Please fill in all fields'); return; }
     setStep(2);
   };
 
   const handleStep2 = () => {
-    if (!industry) {
-      toast.error('Please select an industry');
-      return;
-    }
+    if (!industry) { toast.error('Please select an industry'); return; }
     setStep(3);
   };
 
@@ -58,10 +54,7 @@ const OnboardingPage = () => {
     const files = Array.from(fileList).filter(f =>
       f.name.endsWith('.csv') || f.name.endsWith('.xlsx') || f.name.endsWith('.xls')
     );
-    if (files.length === 0) {
-      toast.error('Please upload CSV or Excel files');
-      return;
-    }
+    if (files.length === 0) { toast.error('Please upload CSV or Excel files'); return; }
     const processed = await Promise.all(files.map(processFile));
     setUploadedFiles(prev => [...prev, ...processed]);
   }, [processFile]);
@@ -70,11 +63,9 @@ const OnboardingPage = () => {
     setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, mapping } : f));
   };
 
-  const handleProcessFile = async (fileId) => {
-    setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'processing' } : f));
-    await new Promise(r => setTimeout(r, 2000));
+  const handleProcessFile = (fileId) => {
     setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'ready' } : f));
-    toast.success('File processed!');
+    toast.success('File ready!');
   };
 
   const handleResetMapping = (fileId) => {
@@ -91,19 +82,46 @@ const OnboardingPage = () => {
   const handleFinish = async () => {
     if (uploadMode === 'upload') {
       const allReady = uploadedFiles.length > 0 && uploadedFiles.every(f => f.status === 'ready');
-      if (!allReady) {
-        toast.error('Please process all uploaded files first');
-        return;
-      }
+      if (!allReady) { toast.error('Please process all uploaded files first'); return; }
     }
     setProcessing(true);
-    await new Promise((r) => setTimeout(r, 1500));
-    if (profile) {
-      setProfile({ ...profile, full_name: fullName, company_name: companyName, industry, role: userRole, onboarding_completed: true });
+    try {
+      // Save profile to DB
+      const profileData = {
+        id: user.id,
+        full_name: fullName,
+        company_name: companyName,
+        industry: industry.toLowerCase(),
+        role: userRole,
+        onboarding_completed: true,
+      };
+      const { error: profileError } = await supabase.from('profiles').upsert(profileData);
+      if (profileError) throw profileError;
+
+      // Update company_name in the login log
+      await supabase
+        .from('user_logins')
+        .update({ company_name: companyName })
+        .eq('email', user.email)
+        .is('company_name', null);
+
+      // Upload processed files to Supabase Storage
+      if (uploadMode === 'upload' && uploadedFiles.length > 0) {
+        await Promise.all(
+          uploadedFiles
+            .filter(f => f.status === 'ready')
+            .map(f => uploadDataFile(user.id, f.file, f.mapping, f.previewRows.length))
+        );
+      }
+
+      setProfile(profileData);
+      toast.success('Your workspace is ready!');
+      navigate('/dashboard');
+    } catch (err) {
+      toast.error(err.message || 'Setup failed');
+    } finally {
+      setProcessing(false);
     }
-    setProcessing(false);
-    toast.success('Your workspace is ready! 🎉');
-    navigate('/dashboard');
   };
 
   const allFilesReady = uploadedFiles.length > 0 && uploadedFiles.every(f => f.status === 'ready');
@@ -215,10 +233,7 @@ const OnboardingPage = () => {
                       input.type = 'file';
                       input.accept = '.csv,.xlsx,.xls';
                       input.multiple = true;
-                      input.onchange = (ev) => {
-                        const files = ev.target.files;
-                        if (files) handleFilesAdded(files);
-                      };
+                      input.onchange = (ev) => { if (ev.target.files) handleFilesAdded(ev.target.files); };
                       input.click();
                     }}
                     className="border-2 border-dashed border-border rounded-xl p-6 text-center hover:border-primary/50 transition-colors cursor-pointer"
@@ -249,7 +264,7 @@ const OnboardingPage = () => {
 
               {processing && (
                 <div className="mt-4 space-y-2">
-                  {['📊 Setting up workspace...', '🔍 Configuring intelligence...', '✅ Ready!'].map((msg, i) => (
+                  {['📊 Saving your profile...', '☁️ Uploading files...', '✅ Workspace ready!'].map((msg, i) => (
                     <motion.p key={msg} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.5 }}
                       className="text-sm text-foreground-secondary">{msg}</motion.p>
                   ))}

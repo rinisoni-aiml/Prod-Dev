@@ -1,22 +1,88 @@
+import { useEffect } from 'react';
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
+import { supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/stores/authStore';
+
+// ── Shared pages (same for every industry) ───────────────────────────────────
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import OnboardingPage from "./pages/OnboardingPage";
-import DashboardPage from "./pages/DashboardPage";
-import ForecastingPage from "./pages/ForecastingPage";
-import InventoryPage from "./pages/InventoryPage";
-import ContractsAlertsPage from "./pages/ContractsAlertsPage";
-import DataUploadPage from "./pages/DataUploadPage";
 import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/SettingsPage";
 import AppLayout from "./components/layout/AppLayout";
 import NotFound from "./pages/NotFound";
 
+// ── Industry routes ───────────────────────────────────────────────────────────
+// Each industry exports fmcgDashboardRoutes (or equivalent) — an array of
+// { path, element } objects that are mounted inside the /dashboard shell.
+// To add a new industry: import its routes here and spread into the router below.
+import { fmcgDashboardRoutes } from './industries/fmcg/routes';
+
 const queryClient = new QueryClient();
+
+const ProtectedRoute = ({ children }) => {
+  const { isAuthenticated, isLoading } = useAuthStore();
+  const location = useLocation();
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+  if (!isAuthenticated) return <Navigate to="/login" state={{ from: location }} replace />;
+  return children;
+};
+
+const AuthInitializer = ({ children }) => {
+  const { setUser, setProfile, setLoading, fetchProfile } = useAuthStore();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!supabase) { setLoading(false); return; }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser(session.user);
+        fetchProfile(session.user.id).finally(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        // After email confirmation, redirect to onboarding or dashboard
+        if (event === 'SIGNED_IN') {
+          fetchProfile(session.user.id).then((profile) => {
+            const publicPaths = ['/', '/login', '/signup'];
+            if (publicPaths.includes(window.location.pathname)) {
+              if (profile?.onboarding_completed) {
+                navigate('/dashboard');
+              } else {
+                navigate('/onboarding');
+              }
+            }
+          });
+        } else {
+          fetchProfile(session.user.id);
+        }
+      } else {
+        setUser(null);
+        setProfile(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  return children;
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -34,26 +100,45 @@ const App = () => (
         }}
       />
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignupPage />} />
-          <Route path="/onboarding" element={<OnboardingPage />} />
-          <Route path="/dashboard" element={<AppLayout />}>
-            <Route index element={<DashboardPage />} />
-            <Route path="forecasting" element={<ForecastingPage />} />
-            <Route path="inventory" element={<InventoryPage />} />
-            <Route path="contracts" element={<ContractsAlertsPage />} />
-            <Route path="data" element={<DataUploadPage />} />
-          </Route>
-          <Route path="/profile" element={<AppLayout />}>
-            <Route index element={<ProfilePage />} />
-          </Route>
-          <Route path="/settings" element={<AppLayout />}>
-            <Route index element={<SettingsPage />} />
-          </Route>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <AuthInitializer>
+          <Routes>
+            {/* ── Public pages ───────────────────────────────────────────── */}
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<SignupPage />} />
+            <Route path="/onboarding" element={
+              <ProtectedRoute><OnboardingPage /></ProtectedRoute>
+            } />
+
+            {/* ── Dashboard shell — industry pages render as children ─────── */}
+            <Route path="/dashboard" element={
+              <ProtectedRoute><AppLayout /></ProtectedRoute>
+            }>
+              {fmcgDashboardRoutes.map((route, i) =>
+                route.index
+                  ? <Route key={i} index element={route.element} />
+                  : <Route key={i} path={route.path} element={route.element} />
+              )}
+              {/* Future industry routes are added here by importing and spreading
+                  their route arrays. Example:
+                  {healthcareDashboardRoutes.map((route, i) => ...)} */}
+            </Route>
+
+            {/* ── Shared authenticated pages ──────────────────────────────── */}
+            <Route path="/profile" element={
+              <ProtectedRoute><AppLayout /></ProtectedRoute>
+            }>
+              <Route index element={<ProfilePage />} />
+            </Route>
+            <Route path="/settings" element={
+              <ProtectedRoute><AppLayout /></ProtectedRoute>
+            }>
+              <Route index element={<SettingsPage />} />
+            </Route>
+
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AuthInitializer>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Mail, Lock, User, ArrowRight } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User, ArrowRight, CheckCircle } from 'lucide-react';
 import Logo from '@/components/Logo';
 import ThemeToggle from '@/components/ThemeToggle';
 import { useAuthStore } from '@/stores/authStore';
+import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 
 const SignupPage = () => {
@@ -13,39 +14,71 @@ const SignupPage = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const navigate = useNavigate();
-  const { setUser, setProfile } = useAuthStore();
+  const { setUser } = useAuthStore();
 
   const handleSignup = async (e) => {
     e.preventDefault();
-    if (!name || !email || !password) {
-      toast.error('Please fill in all fields');
-      return;
-    }
-    if (password.length < 6) {
-      toast.error('Password must be at least 6 characters');
-      return;
-    }
+    if (!name || !email || !password) { toast.error('Please fill in all fields'); return; }
+    if (password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1000));
-      const demoUser = { id: 'demo-user', email };
-      const demoProfile = {
-        id: 'demo-user', full_name: name, company_name: '',
-        industry: '', role: 'admin', plan: 'free', theme_preference: 'dark',
-        onboarding_completed: false, created_at: new Date().toISOString(),
-      };
-      localStorage.setItem('pulseiq-token', 'demo-token');
-      setUser(demoUser);
-      setProfile(demoProfile);
-      toast.success('Account created!');
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: name } },
+      });
+      if (error) throw error;
+
+      // session is null when email confirmation is required
+      if (!data.session) {
+        setAwaitingConfirmation(true);
+        return;
+      }
+
+      // session exists → email confirmation is disabled, proceed directly
+      setUser(data.user);
+
+      await supabase.from('user_logins').insert({
+        email,
+        login_type: 'signup',
+        logged_at: new Date().toISOString(),
+      });
+
+      toast.success('Account created! Let\'s set up your workspace.');
       navigate('/onboarding');
-    } catch {
-      toast.error('Signup failed');
+    } catch (err) {
+      toast.error(err.message || 'Signup failed');
     } finally {
       setLoading(false);
     }
   };
+
+  if (awaitingConfirmation) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-8">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md text-center">
+          <Logo className="mx-auto mb-8" />
+          <div className="glass-card p-10 rounded-2xl">
+            <CheckCircle className="h-12 w-12 text-success mx-auto mb-4" />
+            <h1 className="text-2xl font-bold text-foreground mb-2">Check your email</h1>
+            <p className="text-foreground-secondary mb-2">
+              We sent a confirmation link to <span className="font-medium text-foreground">{email}</span>.
+            </p>
+            <p className="text-sm text-foreground-secondary mb-8">
+              Click the link to confirm your account, then come back and log in.
+            </p>
+            <Link to="/login"
+              className="w-full gradient-brand text-primary-foreground py-2.5 rounded-lg font-semibold text-sm hover-lift inline-flex items-center justify-center gap-2">
+              Go to Login <ArrowRight className="h-4 w-4" />
+            </Link>
+            <p className="text-xs text-foreground-secondary mt-4">Didn't receive it? Check spam or wait a minute and try again.</p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex">
