@@ -176,7 +176,7 @@ async def get_file_skus(
 
 # ─── Legacy: forecast from demand_history table ───────────────────────────────
 
-@router.get("/")
+@router.get("")
 async def get_forecast_legacy(
     sku: str | None = Query(None),
     periods: int = Query(30, ge=7, le=90),

@@ -6,7 +6,7 @@ from app.utils.supabase_client import supabase
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 async def get_contracts(current_user=Depends(get_current_user)):
     uid = str(current_user.id)
     try:
@@ -16,7 +16,7 @@ async def get_contracts(current_user=Depends(get_current_user)):
         return []
 
 
-@router.post("/")
+@router.post("")
 async def create_contract(contract: ContractCreate, current_user=Depends(get_current_user)):
     uid = str(current_user.id)
     try:
