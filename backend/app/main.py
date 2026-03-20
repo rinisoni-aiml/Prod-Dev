@@ -20,6 +20,7 @@ app = FastAPI(
     title="PulseIQ API",
     version="1.0.0",
     description="Multi-industry intelligence platform API — FMCG, Healthcare, Logistics and more.",
+    redirect_slashes=False,
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
