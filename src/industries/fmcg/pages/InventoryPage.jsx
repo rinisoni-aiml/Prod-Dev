@@ -534,7 +534,7 @@ function OptimizationTab({ user }) {
               No stock_level column found — current stock assumed 0 for all SKUs
             </p>
           )}
-          {result && (
+          {result && result.params && (
             <p className="text-xs text-foreground-secondary">
               Lead time {result.params.lead_time_days}d · Service {(result.params.service_level * 100).toFixed(0)}% · Z={result.params.z_score}
             </p>
