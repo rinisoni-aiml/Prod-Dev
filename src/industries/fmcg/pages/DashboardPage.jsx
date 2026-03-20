@@ -83,39 +83,41 @@ const DashboardPage = () => {
 
   const enabled = !!user;
 
+  const toArray = (v) => (Array.isArray(v) ? v : []);
+
   const { data: kpis = [] } = useQuery({
     queryKey: ['dashboard-kpis'],
-    queryFn: () => dashboardApi.getKPIs().then((r) => r.data),
+    queryFn: () => dashboardApi.getKPIs().then((r) => toArray(r.data)),
     enabled,
   });
 
   const { data: demandTrend = [] } = useQuery({
     queryKey: ['dashboard-demand-trend'],
-    queryFn: () => dashboardApi.getDemandTrend().then((r) => r.data),
+    queryFn: () => dashboardApi.getDemandTrend().then((r) => toArray(r.data)),
     enabled,
   });
 
   const { data: topSKUs = [] } = useQuery({
     queryKey: ['dashboard-top-skus'],
-    queryFn: () => dashboardApi.getTopSKUs().then((r) => r.data),
+    queryFn: () => dashboardApi.getTopSKUs().then((r) => toArray(r.data)),
     enabled,
   });
 
   const { data: rawSnapshot = [] } = useQuery({
     queryKey: ['dashboard-inventory-snapshot'],
-    queryFn: () => dashboardApi.getInventorySnapshot().then((r) => r.data),
+    queryFn: () => dashboardApi.getInventorySnapshot().then((r) => toArray(r.data)),
     enabled,
   });
 
   const { data: alerts = [] } = useQuery({
     queryKey: ['alerts'],
-    queryFn: () => alertsApi.getAll().then((r) => r.data),
+    queryFn: () => alertsApi.getAll().then((r) => toArray(r.data)),
     enabled,
   });
 
   const { data: aiInsights = [] } = useQuery({
     queryKey: ['ai-insights'],
-    queryFn: () => aiApi.getInsights().then((r) => r.data),
+    queryFn: () => aiApi.getInsights().then((r) => toArray(r.data)),
     enabled,
   });
 
