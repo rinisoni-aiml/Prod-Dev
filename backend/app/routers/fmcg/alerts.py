@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 async def get_alerts(
     resolved: bool | None = Query(None),
     severity: str | None = Query(None),
@@ -26,7 +26,7 @@ async def get_alerts(
         return []
 
 
-@router.post("/")
+@router.post("")
 async def create_alert(alert: AlertCreate, current_user=Depends(get_current_user)):
     uid = str(current_user.id)
     try:
