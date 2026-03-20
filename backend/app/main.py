@@ -23,9 +23,7 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-origins = [settings.frontend_url, "http://localhost:5173", "http://localhost:8080"]
-if settings.environment == "production":
-    origins.append("https://*.vercel.app")
+origins = [settings.frontend_url.rstrip("/"), "http://localhost:5173", "http://localhost:8080"]
 
 app.add_middleware(
     CORSMiddleware,
