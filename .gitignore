@@ -30,6 +30,17 @@ dist-ssr
 
 # Temporary source folders (reference only — not part of this repo)
 logistic_ai-main/
+New logistic dataset/
+
+# Migration and documentation files (temporary)
+RESTRUCTURE_GUIDE.md
+MIGRATION_SCRIPT.md
+RESTRUCTURE_COMPLETE.md
+DEPLOY_INSTRUCTIONS.md
+migrate_backend.py
+generate_release_note.py
+*.docx
+QA_Release_Note.docx
 
 # Python
 __pycache__/

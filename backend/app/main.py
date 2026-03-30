@@ -3,21 +3,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 
 # ── Shared routers ────────────────────────────────────────────────────────────
-from app.routers import auth
-
-# ── Logistics routers ────────────────────────────────────────────────────────
-from app.routers.logistics import data as logistics_data
+from app.shared.routers import auth
 
 # ── FMCG routers ─────────────────────────────────────────────────────────────
-# All FMCG routes are prefixed /api/fmcg/<resource>
-# To add a new industry, import its routers here and register below.
-from app.routers.fmcg import dashboard as fmcg_dashboard
-from app.routers.fmcg import inventory as fmcg_inventory
-from app.routers.fmcg import alerts as fmcg_alerts
-from app.routers.fmcg import contracts as fmcg_contracts
-from app.routers.fmcg import forecasting as fmcg_forecasting
-from app.routers.fmcg import ai as fmcg_ai
-from app.routers.fmcg import data as fmcg_data
+from app.industries.fmcg.routers import dashboard as fmcg_dashboard
+from app.industries.fmcg.routers import inventory as fmcg_inventory
+from app.industries.fmcg.routers import alerts as fmcg_alerts
+from app.industries.fmcg.routers import contracts as fmcg_contracts
+from app.industries.fmcg.routers import forecasting as fmcg_forecasting
+from app.industries.fmcg.routers import ai as fmcg_ai
+from app.industries.fmcg.routers import data as fmcg_data
+
+# ── Logistics routers ────────────────────────────────────────────────────────
+from app.industries.logistics.routers import data as logistics_data
 
 app = FastAPI(
     title="PulseIQ API",
@@ -51,10 +49,6 @@ app.include_router(fmcg_data.router,        prefix="/api/fmcg/data",        tags
 
 # ── Logistics routes ──────────────────────────────────────────────────────────
 app.include_router(logistics_data.router, prefix="/api/logistics/data", tags=["Logistics - Data"])
-
-# ── Future industry routes ────────────────────────────────────────────────────
-# from app.routers.healthcare import dashboard as hc_dashboard
-# app.include_router(hc_dashboard.router, prefix="/api/healthcare/dashboard", tags=["Healthcare - Dashboard"])
 
 
 @app.get("/")

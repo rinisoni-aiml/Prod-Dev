@@ -1,0 +1,1 @@
+"""FMCG Industry implementation."""
