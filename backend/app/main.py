@@ -5,6 +5,9 @@ from app.config import settings
 # ── Shared routers ────────────────────────────────────────────────────────────
 from app.routers import auth
 
+# ── Logistics routers ────────────────────────────────────────────────────────
+from app.routers.logistics import data as logistics_data
+
 # ── FMCG routers ─────────────────────────────────────────────────────────────
 # All FMCG routes are prefixed /api/fmcg/<resource>
 # To add a new industry, import its routers here and register below.
@@ -45,6 +48,9 @@ app.include_router(fmcg_contracts.router,   prefix="/api/fmcg/contracts",   tags
 app.include_router(fmcg_forecasting.router, prefix="/api/fmcg/forecasting", tags=["FMCG - Forecasting"])
 app.include_router(fmcg_ai.router,          prefix="/api/fmcg/ai",          tags=["FMCG - AI"])
 app.include_router(fmcg_data.router,        prefix="/api/fmcg/data",        tags=["FMCG - Data"])
+
+# ── Logistics routes ──────────────────────────────────────────────────────────
+app.include_router(logistics_data.router, prefix="/api/logistics/data", tags=["Logistics - Data"])
 
 # ── Future industry routes ────────────────────────────────────────────────────
 # from app.routers.healthcare import dashboard as hc_dashboard
