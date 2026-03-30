@@ -70,7 +70,7 @@ const AuthInitializer = ({ children }) => {
       if (session?.user) {
         setUser(session.user);
         // After email confirmation, redirect to onboarding or dashboard
-        if (event === 'SIGNED_IN') {
+        if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
           fetchProfile(session.user.id).then((profile) => {
             const publicPaths = ['/', '/login', '/signup'];
             if (publicPaths.includes(window.location.pathname)) {
