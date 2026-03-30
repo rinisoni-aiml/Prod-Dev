@@ -21,8 +21,20 @@ import NotFound from "./pages/NotFound";
 // { path, element } objects that are mounted inside the /dashboard shell.
 // To add a new industry: import its routes here and spread into the router below.
 import { fmcgDashboardRoutes } from './industries/fmcg/routes';
+import { logisticsDashboardRoutes } from './industries/logistics/routes';
+import DashboardPage from './industries/fmcg/pages/DashboardPage';
+import { LogisticsAppProvider } from './industries/logistics/context/LogisticsAppContext';
 
 const queryClient = new QueryClient();
+
+// Routes logistics users away from the FMCG index to their own home
+const IndustryHome = () => {
+  const { profile } = useAuthStore();
+  if (profile?.industry === 'logistics') {
+    return <Navigate to="/dashboard/logistics" replace />;
+  }
+  return <DashboardPage />;
+};
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuthStore();
@@ -112,16 +124,15 @@ const App = () => (
 
             {/* ── Dashboard shell — industry pages render as children ─────── */}
             <Route path="/dashboard" element={
-              <ProtectedRoute><AppLayout /></ProtectedRoute>
+              <ProtectedRoute><LogisticsAppProvider><AppLayout /></LogisticsAppProvider></ProtectedRoute>
             }>
-              {fmcgDashboardRoutes.map((route, i) =>
-                route.index
-                  ? <Route key={i} index element={route.element} />
-                  : <Route key={i} path={route.path} element={route.element} />
+              <Route index element={<IndustryHome />} />
+              {fmcgDashboardRoutes.filter(r => !r.index).map((route, i) =>
+                <Route key={i} path={route.path} element={route.element} />
               )}
-              {/* Future industry routes are added here by importing and spreading
-                  their route arrays. Example:
-                  {healthcareDashboardRoutes.map((route, i) => ...)} */}
+              {logisticsDashboardRoutes.map((route, i) =>
+                <Route key={`logistics-${i}`} path={route.path} element={route.element} />
+              )}
             </Route>
 
             {/* ── Shared authenticated pages ──────────────────────────────── */}

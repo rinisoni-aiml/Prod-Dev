@@ -7,7 +7,6 @@ from app.routers import auth
 
 # ── FMCG routers ─────────────────────────────────────────────────────────────
 # All FMCG routes are prefixed /api/fmcg/<resource>
-# To add a new industry, import its routers here and register below.
 from app.routers.fmcg import dashboard as fmcg_dashboard
 from app.routers.fmcg import inventory as fmcg_inventory
 from app.routers.fmcg import alerts as fmcg_alerts
@@ -15,6 +14,11 @@ from app.routers.fmcg import contracts as fmcg_contracts
 from app.routers.fmcg import forecasting as fmcg_forecasting
 from app.routers.fmcg import ai as fmcg_ai
 from app.routers.fmcg import data as fmcg_data
+
+# ── Logistics routers ────────────────────────────────────────────────────────
+from app.industries.logistics.routers import data as logistics_data
+from app.industries.logistics.routers import views as logistics_views
+from app.industries.logistics.routers import upload as logistics_upload
 
 app = FastAPI(
     title="PulseIQ API",
@@ -47,9 +51,10 @@ app.include_router(fmcg_forecasting.router, prefix="/api/fmcg/forecasting", tags
 app.include_router(fmcg_ai.router,          prefix="/api/fmcg/ai",          tags=["FMCG - AI"])
 app.include_router(fmcg_data.router,        prefix="/api/fmcg/data",        tags=["FMCG - Data"])
 
-# ── Future industry routes ────────────────────────────────────────────────────
-# from app.routers.healthcare import dashboard as hc_dashboard
-# app.include_router(hc_dashboard.router, prefix="/api/healthcare/dashboard", tags=["Healthcare - Dashboard"])
+# ── Logistics routes ──────────────────────────────────────────────────────────
+app.include_router(logistics_data.router,   prefix="/api/logistics/data",      tags=["Logistics - Data"])
+app.include_router(logistics_views.router,  prefix="/api/logistics/v1/views",  tags=["Logistics - Views"])
+app.include_router(logistics_upload.router, prefix="/api/logistics/v1/upload", tags=["Logistics - Upload"])
 
 
 @app.get("/")
