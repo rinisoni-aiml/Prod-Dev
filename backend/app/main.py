@@ -6,19 +6,16 @@ from app.config import settings
 from app.shared.routers import auth
 
 # ── FMCG routers ─────────────────────────────────────────────────────────────
-# NOTE: Only dashboard is migrated so far. Run migrate_backend.py to complete.
 from app.industries.fmcg.routers import dashboard as fmcg_dashboard
-
-# Temporary: Import from old locations until migration is complete
-from app.routers.fmcg import inventory as fmcg_inventory
-from app.routers.fmcg import alerts as fmcg_alerts
-from app.routers.fmcg import contracts as fmcg_contracts
-from app.routers.fmcg import forecasting as fmcg_forecasting
-from app.routers.fmcg import ai as fmcg_ai
-from app.routers.fmcg import data as fmcg_data
+from app.industries.fmcg.routers import inventory as fmcg_inventory
+from app.industries.fmcg.routers import alerts as fmcg_alerts
+from app.industries.fmcg.routers import contracts as fmcg_contracts
+from app.industries.fmcg.routers import forecasting as fmcg_forecasting
+from app.industries.fmcg.routers import ai as fmcg_ai
+from app.industries.fmcg.routers import data as fmcg_data
 
 # ── Logistics routers ────────────────────────────────────────────────────────
-from app.routers.logistics import data as logistics_data
+from app.industries.logistics.routers import data as logistics_data
 
 app = FastAPI(
     title="PulseIQ API",
