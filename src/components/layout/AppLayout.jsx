@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { Bell, ChevronDown, LogOut, Settings, User, LayoutDashboard, TrendingUp, Package, FileText, Upload, PanelLeftClose, PanelLeft, Clock } from 'lucide-react';
+import { Bell, ChevronDown, LogOut, Settings, User, LayoutDashboard, TrendingUp, Package, FileText, Upload, PanelLeftClose, PanelLeft, Clock, AlertTriangle, Truck } from 'lucide-react';
 import { useState } from 'react';
 import Logo from '@/components/Logo';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import AIChatDrawer from '@/components/chat/AIChatDrawer';
 import AIChatFAB from '@/components/chat/AIChatFAB';
 
-const navItems = [
+const fmcgNavItems = [
   { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
   { label: 'Forecasting', path: '/dashboard/forecasting', icon: TrendingUp },
   { label: 'Inventory', path: '/dashboard/inventory', icon: Package },
@@ -15,11 +15,24 @@ const navItems = [
   { label: 'Data Upload', path: '/dashboard/data', icon: Upload },
 ];
 
+const logisticsNavItems = [
+  { label: 'Dashboard',     path: '/dashboard/logistics',              icon: LayoutDashboard },
+  { label: 'Alert Center',  path: '/dashboard/logistics/alerts',       icon: AlertTriangle },
+  { label: 'Shipment Risk', path: '/dashboard/logistics/shipment-risk', icon: Truck },
+  { label: 'Data Upload',   path: '/dashboard/logistics/data',         icon: Upload },
+];
+
+const navItemsByIndustry = {
+  fmcg: fmcgNavItems,
+  logistics: logisticsNavItems,
+};
+
 const AppLayout = () => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { profile, logout } = useAuthStore();
   const navigate = useNavigate();
+  const navItems = navItemsByIndustry[profile?.industry] || fmcgNavItems;
 
   const handleLogout = async () => { await logout(); navigate('/'); };
   const lastUpdated = new Date();
