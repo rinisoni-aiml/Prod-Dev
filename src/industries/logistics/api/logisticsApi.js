@@ -66,6 +66,22 @@ export const deleteChatSession = async (sessionId) => {
   return response.data?.data ?? response.data;
 };
 
+// Namespace export for pages that prefer object-style imports
+export const logisticsApi = {
+  getDashboardView,
+  getAlertsView,
+  getComplianceView,
+  getRiskAnalyticsView,
+  getShipmentRiskView,
+  getVendorIntelView,
+  resolveAlert,
+  unresolveAlert,
+  askAIAssistant,
+  getChatSessions,
+  getSessionMessages,
+  deleteChatSession,
+};
+
 // Upload
 export const getUploadConfig = async () => {
   const response = await api.get('/api/logistics/v1/upload/config');

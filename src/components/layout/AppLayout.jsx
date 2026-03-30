@@ -1,5 +1,5 @@
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { Bell, ChevronDown, LogOut, Settings, User, LayoutDashboard, TrendingUp, Package, FileText, Upload, PanelLeftClose, PanelLeft, Clock, AlertTriangle, Truck } from 'lucide-react';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Bell, ChevronDown, LogOut, Settings, User, LayoutDashboard, TrendingUp, Package, FileText, Upload, PanelLeftClose, PanelLeft, Clock, AlertTriangle, Truck, ShieldCheck, BarChart2, Building2, Bot } from 'lucide-react';
 import { useState } from 'react';
 import Logo from '@/components/Logo';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -16,10 +16,14 @@ const fmcgNavItems = [
 ];
 
 const logisticsNavItems = [
-  { label: 'Dashboard',     path: '/dashboard/logistics',              icon: LayoutDashboard },
-  { label: 'Alert Center',  path: '/dashboard/logistics/alerts',       icon: AlertTriangle },
-  { label: 'Shipment Risk', path: '/dashboard/logistics/shipment-risk', icon: Truck },
-  { label: 'Data Upload',   path: '/dashboard/logistics/data',         icon: Upload },
+  { label: 'Dashboard',       path: '/dashboard/logistics',                   icon: LayoutDashboard },
+  { label: 'Alert Center',    path: '/dashboard/logistics/alerts',            icon: AlertTriangle },
+  { label: 'Shipment Risk',   path: '/dashboard/logistics/shipment-risk',     icon: Truck },
+  { label: 'Compliance',      path: '/dashboard/logistics/compliance',        icon: ShieldCheck },
+  { label: 'Risk Analytics',  path: '/dashboard/logistics/risk-analytics',    icon: BarChart2 },
+  { label: 'Vendor Intel',    path: '/dashboard/logistics/vendor-intel',      icon: Building2 },
+  { label: 'AI Assistant',    path: '/dashboard/logistics/ai-assistant',      icon: Bot },
+  { label: 'Data Upload',     path: '/dashboard/logistics/data',              icon: Upload },
 ];
 
 const navItemsByIndustry = {

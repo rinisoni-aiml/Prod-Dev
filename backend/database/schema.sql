@@ -241,6 +241,7 @@ DROP TABLE IF EXISTS lg_drivers CASCADE;
 DROP TABLE IF EXISTS lg_vendors CASCADE;
 DROP TABLE IF EXISTS lg_routes CASCADE;
 DROP TABLE IF EXISTS lg_risk_weight_configuration CASCADE;
+DROP TABLE IF EXISTS lg_chat_messages CASCADE;
 
 -- lg_routes
 CREATE TABLE lg_routes (
@@ -483,3 +484,15 @@ CREATE TABLE lg_risk_weight_configuration (
 );
 ALTER TABLE lg_risk_weight_configuration ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users manage own lg_risk_weight_configuration" ON lg_risk_weight_configuration FOR ALL USING (auth.uid() = user_id);
+
+-- lg_chat_messages (Logistics AI assistant chat history)
+CREATE TABLE IF NOT EXISTS lg_chat_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  session_id UUID NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE lg_chat_messages ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users manage own lg_chat_messages" ON lg_chat_messages FOR ALL USING (auth.uid() = user_id);

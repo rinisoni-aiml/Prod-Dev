@@ -282,6 +282,373 @@ async def unresolve_alert(alert_id: str, current_user=Depends(get_current_user))
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ─── Compliance View ───────────────────────────────────────────────────────────
+
+@router.get("/compliance")
+async def get_compliance_view(current_user=Depends(get_current_user)):
+    uid = str(current_user.id)
+    try:
+        trucks_resp = (
+            supabase.table("lg_trucks")
+            .select("truck_id, truck_number, truck_type, truck_status, insurance_expiry_date, fitness_expiry_date, registration_expiry_date")
+            .eq("user_id", uid)
+            .execute()
+        )
+        trucks_raw = trucks_resp.data or []
+
+        drivers_resp = (
+            supabase.table("lg_drivers")
+            .select("driver_id, driver_name, driver_status, license_number, license_expiry_date")
+            .eq("user_id", uid)
+            .execute()
+        )
+        drivers_raw = drivers_resp.data or []
+
+        def _doc(exp_date):
+            days = _compliance_days(exp_date)
+            if days is None:
+                return None
+            if days < 0:
+                return {"date": exp_date[:10] if isinstance(exp_date, str) else str(exp_date), "days": days, "level": "critical", "label": "EXPIRED"}
+            lbl, lvl = _expiry_label(days)
+            return {"date": exp_date[:10] if isinstance(exp_date, str) else str(exp_date), "days": days, "level": lvl, "label": lbl}
+
+        critical_expiries = 0
+        high_risk_assets = 0
+
+        truck_rows = []
+        for t in trucks_raw:
+            ins = _doc(t.get("insurance_expiry_date"))
+            fit = _doc(t.get("fitness_expiry_date"))
+            reg = _doc(t.get("registration_expiry_date"))
+            docs = {k: v for k, v in [("insurance", ins), ("fitness", fit), ("registration", reg)] if v}
+            doc_levels = [d["level"] for d in docs.values()]
+            if "critical" in doc_levels:
+                critical_expiries += 1
+                sev, risk_label = "critical", "CRITICAL Risk"
+            elif "high" in doc_levels:
+                high_risk_assets += 1
+                sev, risk_label = "high", "HIGH Risk"
+            elif "medium" in doc_levels:
+                sev, risk_label = "medium", "MEDIUM Risk"
+            else:
+                sev, risk_label = "low", "LOW Risk"
+            truck_rows.append({
+                "id": t.get("truck_id"),
+                "asset": t.get("truck_number") or t.get("truck_id"),
+                "type": t.get("truck_type", "Unknown"),
+                "status": t.get("truck_status", "ACTIVE"),
+                "risk_score": 85 if sev == "critical" else 70 if sev == "high" else 50 if sev == "medium" else 20,
+                "risk_label": risk_label,
+                "alert_severity": sev,
+                "documents": docs,
+            })
+
+        # Fetch all driver incidents in one query
+        all_incidents_resp = (
+            supabase.table("lg_driver_incidents")
+            .select("driver_id")
+            .eq("user_id", uid)
+            .execute()
+        )
+        incident_counts: dict[str, int] = {}
+        for inc in (all_incidents_resp.data or []):
+            did = str(inc.get("driver_id") or "")
+            if did:
+                incident_counts[did] = incident_counts.get(did, 0) + 1
+
+        driver_rows = []
+        for d in drivers_raw:
+            lic = _doc(d.get("license_expiry_date"))
+            docs = {"license": lic} if lic else {}
+            sev = lic["level"] if lic else "low"
+            if sev == "critical":
+                critical_expiries += 1
+            elif sev == "high":
+                high_risk_assets += 1
+            incident_count = incident_counts.get(str(d.get("driver_id") or ""), 0)
+            driver_rows.append({
+                "id": d.get("driver_id"),
+                "name": d.get("driver_name") or d.get("driver_id"),
+                "status": d.get("driver_status", "ACTIVE"),
+                "license_number": d.get("license_number", ""),
+                "incidents": incident_count,
+                "risk_score": 85 if sev == "critical" else 70 if sev == "high" else 50 if sev == "medium" else 20,
+                "risk_label": ("CRITICAL" if sev == "critical" else "HIGH" if sev == "high" else "MEDIUM" if sev == "medium" else "LOW") + " Risk",
+                "alert_severity": sev,
+                "documents": docs,
+            })
+
+        return {
+            "data": {
+                "kpis": {
+                    "critical_expiries": critical_expiries,
+                    "high_risk_assets": high_risk_assets,
+                    "fleet_tracked": len(truck_rows),
+                    "drivers_tracked": len(driver_rows),
+                },
+                "trucks": truck_rows,
+                "drivers": driver_rows,
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Risk Analytics View ───────────────────────────────────────────────────────
+
+@router.get("/risk-analytics")
+async def get_risk_analytics_view(current_user=Depends(get_current_user)):
+    uid = str(current_user.id)
+    try:
+        ship_resp = (
+            supabase.table("lg_shipments")
+            .select("shipment_id, origin_city, destination_city, vendor_id")
+            .eq("user_id", uid)
+            .execute()
+        )
+        shipments = ship_resp.data or []
+
+        snap_resp = (
+            supabase.table("lg_shipment_risk_snapshots")
+            .select("shipment_id, overall_risk_score, vendor_risk_score, vendor_id")
+            .eq("user_id", uid)
+            .execute()
+        )
+        snaps_by_ship = {str(s["shipment_id"]): s for s in (snap_resp.data or [])}
+
+        # Top routes
+        route_map: dict[str, dict] = {}
+        for ship in shipments:
+            route = f"{ship.get('origin_city','?')} → {ship.get('destination_city','?')}"
+            snap = snaps_by_ship.get(str(ship.get("shipment_id")), {})
+            rs = _safe_float(snap.get("overall_risk_score"))
+            if route not in route_map:
+                route_map[route] = {"scores": [], "count": 0}
+            route_map[route]["scores"].append(rs)
+            route_map[route]["count"] += 1
+
+        top_routes = []
+        for name, info in sorted(route_map.items(), key=lambda x: -sum(x[1]["scores"]) / max(len(x[1]["scores"]), 1)):
+            avg = sum(info["scores"]) / len(info["scores"]) if info["scores"] else 0
+            top_routes.append({"name": name, "risk_score": round(avg, 1), "shipments": info["count"], "risk_level": _risk_level(avg)})
+
+        # Vendor comparison
+        vendors_resp = (
+            supabase.table("lg_vendors")
+            .select("vendor_id, vendor_name")
+            .eq("user_id", uid)
+            .execute()
+        )
+        vendors = vendors_resp.data or []
+
+        vendor_snaps: dict[str, list] = {}
+        for snap in (snap_resp.data or []):
+            vid = str(snap.get("vendor_id") or "")
+            if vid:
+                vendor_snaps.setdefault(vid, []).append(_safe_float(snap.get("vendor_risk_score")))
+
+        vpm_resp = (
+            supabase.table("lg_vendor_performance_metrics")
+            .select("vendor_id, on_time_pct, delay_rate_pct, window_days")
+            .eq("user_id", uid)
+            .order("window_days", desc=True)
+            .execute()
+        )
+        vpm_by_vendor: dict[str, dict] = {}
+        for vpm in (vpm_resp.data or []):
+            vid = str(vpm.get("vendor_id") or "")
+            if vid not in vpm_by_vendor:
+                vpm_by_vendor[vid] = vpm
+
+        vendor_comparison = []
+        for v in vendors:
+            vid = str(v.get("vendor_id"))
+            scores = vendor_snaps.get(vid, [])
+            avg_risk = sum(scores) / len(scores) if scores else 0.0
+            vpm = vpm_by_vendor.get(vid, {})
+            vendor_comparison.append({
+                "vendor_name": v.get("vendor_name") or vid,
+                "risk_score": round(avg_risk, 1),
+                "delay_rate_pct": _safe_float(vpm.get("delay_rate_pct")),
+                "on_time_pct": _safe_float(vpm.get("on_time_pct")),
+            })
+        vendor_comparison.sort(key=lambda x: -x["risk_score"])
+
+        # Market volatility
+        mfi_resp = (
+            supabase.table("lg_market_freight_intelligence")
+            .select("origin_city, destination_city, volatility_index")
+            .eq("user_id", uid)
+            .execute()
+        )
+        mfi_map: dict[str, list] = {}
+        for row in (mfi_resp.data or []):
+            name = f"{row.get('origin_city','?')} → {row.get('destination_city','?')}"
+            mfi_map.setdefault(name, []).append(_safe_float(row.get("volatility_index")))
+        market_volatility = sorted(
+            [{"name": k, "volatility": round(sum(v) / len(v), 3)} for k, v in mfi_map.items()],
+            key=lambda x: -x["volatility"],
+        )[:10]
+
+        # Risk weight contributors
+        rw_resp = (
+            supabase.table("lg_risk_weight_configuration")
+            .select("compliance_weight, vendor_weight, operational_weight, financial_weight")
+            .eq("user_id", uid)
+            .limit(1)
+            .execute()
+        )
+        rw = (rw_resp.data or [{}])[0]
+        compliance_w = _safe_float(rw.get("compliance_weight"), 25.0)
+        vendor_w = _safe_float(rw.get("vendor_weight"), 25.0)
+        operational_w = _safe_float(rw.get("operational_weight"), 25.0)
+        financial_w = _safe_float(rw.get("financial_weight"), 25.0)
+        total_w = compliance_w + vendor_w + operational_w + financial_w or 100.0
+        contributors = [
+            {"name": "Operational", "contribution_pct": round(operational_w / total_w * 100, 1)},
+            {"name": "Financial", "contribution_pct": round(financial_w / total_w * 100, 1)},
+            {"name": "Vendor", "contribution_pct": round(vendor_w / total_w * 100, 1)},
+            {"name": "Compliance", "contribution_pct": round(compliance_w / total_w * 100, 1)},
+        ]
+
+        return {
+            "data": {
+                "top_routes": top_routes[:10],
+                "vendor_comparison": vendor_comparison[:15],
+                "market_volatility": market_volatility,
+                "contributors": contributors,
+                "insight_text": "Adjust weights in risk configuration to reprioritize scoring components.",
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Vendor Intel View ─────────────────────────────────────────────────────────
+
+@router.get("/vendor-intel")
+async def get_vendor_intel_view(
+    vendor_id: str | None = Query(None),
+    current_user=Depends(get_current_user),
+):
+    uid = str(current_user.id)
+    try:
+        vendors_resp = (
+            supabase.table("lg_vendors")
+            .select("vendor_id, vendor_name, vendor_status")
+            .eq("user_id", uid)
+            .order("vendor_name")
+            .execute()
+        )
+        vendors = vendors_resp.data or []
+
+        target_id = vendor_id
+        if not target_id and vendors:
+            target_id = str(vendors[0].get("vendor_id"))
+
+        selected_vendor = next((v for v in vendors if str(v.get("vendor_id")) == str(target_id)), vendors[0] if vendors else {})
+
+        selected_data: dict = {}
+        if target_id and selected_vendor:
+            ships_resp = (
+                supabase.table("lg_shipments")
+                .select("shipment_id, shipment_status, origin_city, destination_city, shipment_value")
+                .eq("user_id", uid)
+                .eq("vendor_id", str(target_id))
+                .execute()
+            )
+            vendor_ships = ships_resp.data or []
+            ship_ids = [str(s["shipment_id"]) for s in vendor_ships]
+
+            risk_rows = []
+            if ship_ids:
+                snaps_resp = (
+                    supabase.table("lg_shipment_risk_snapshots")
+                    .select("shipment_id, overall_risk_score, financial_exposure_score")
+                    .eq("user_id", uid)
+                    .in_("shipment_id", ship_ids[:200])
+                    .order("overall_risk_score", desc=True)
+                    .execute()
+                )
+                risk_rows = snaps_resp.data or []
+
+            risk_scores = [_safe_float(r.get("overall_risk_score")) for r in risk_rows]
+            avg_risk = sum(risk_scores) / len(risk_scores) if risk_scores else 0.0
+            total_value = sum(_safe_float(s.get("shipment_value")) for s in vendor_ships)
+
+            status_counts: dict[str, int] = {}
+            for s in vendor_ships:
+                st = s.get("shipment_status", "UNKNOWN")
+                status_counts[st] = status_counts.get(st, 0) + 1
+            status_mix = [{"status": k, "count": v} for k, v in status_counts.items()]
+
+            vpm_resp = (
+                supabase.table("lg_vendor_performance_metrics")
+                .select("on_time_pct, delay_rate_pct")
+                .eq("user_id", uid)
+                .eq("vendor_id", str(target_id))
+                .order("window_days", desc=True)
+                .limit(1)
+                .execute()
+            )
+            vpm = (vpm_resp.data or [{}])[0]
+            on_time = _safe_float(vpm.get("on_time_pct"), 0.0)
+            delay_rate = _safe_float(vpm.get("delay_rate_pct"), 0.0)
+
+            snap_by_ship = {str(r["shipment_id"]): r for r in risk_rows}
+            flags = []
+            for s in vendor_ships:
+                snap = snap_by_ship.get(str(s.get("shipment_id")), {})
+                risk = _safe_float(snap.get("overall_risk_score"))
+                status = s.get("shipment_status", "")
+                if status in ("DELAYED", "DELAY") or risk >= 70:
+                    flags.append({
+                        "shipment_id": s.get("shipment_id"),
+                        "origin_city": s.get("origin_city"),
+                        "destination_city": s.get("destination_city"),
+                        "shipment_status": status,
+                        "overall_risk_score": round(risk, 1),
+                        "financial_exposure": _safe_float(snap.get("financial_exposure_score")),
+                        "shipment_value": _safe_float(s.get("shipment_value")),
+                    })
+
+            high_risk_loads = len([r for r in risk_rows if _safe_float(r.get("overall_risk_score")) >= 70])
+
+            if avg_risk >= 70:
+                insight_text = f"Vendor {selected_vendor.get('vendor_name')} shows high average risk of {avg_risk:.1f}/100. Immediate review of carrier contracts is recommended."
+            elif avg_risk >= 50:
+                insight_text = f"Vendor {selected_vendor.get('vendor_name')} has moderate risk at {avg_risk:.1f}/100. On-time delivery at {on_time:.1f}%. Monitor closely."
+            else:
+                insight_text = f"Vendor {selected_vendor.get('vendor_name')} is performing within acceptable thresholds. Risk score {avg_risk:.1f}/100 with {on_time:.1f}% on-time rate."
+
+            selected_data = {
+                "vendor": selected_vendor,
+                "kpis": {
+                    "on_time_pct": on_time,
+                    "delay_rate_pct": delay_rate,
+                    "total_shipments": len(vendor_ships),
+                    "avg_risk": round(avg_risk, 1),
+                    "financial_exposure": total_value,
+                    "high_risk_loads": high_risk_loads,
+                },
+                "status_mix": status_mix,
+                "latest_risk_rows": [{"shipment_id": r.get("shipment_id"), "overall_risk_score": _safe_float(r.get("overall_risk_score"))} for r in risk_rows[:20]],
+                "flags": flags[:10],
+                "insight_text": insight_text,
+                "recommendation": "No delayed or high-risk shipments are currently assigned to this vendor." if not flags else f"{len(flags)} shipment(s) require immediate attention.",
+            }
+
+        return {
+            "data": {
+                "vendors": [{"vendor_id": v.get("vendor_id"), "vendor_name": v.get("vendor_name")} for v in vendors],
+                "selected": selected_data,
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ─── Shipment Risk View ────────────────────────────────────────────────────────
 
 @router.get("/shipment-risk")
