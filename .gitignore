@@ -28,6 +28,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Temporary source folders (reference only — not part of this repo)
+logistic_ai-main/
+
 # Python
 __pycache__/
 *.py[cod]

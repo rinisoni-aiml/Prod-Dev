@@ -46,6 +46,13 @@ export const dataApi = {
   deleteSource: (id) => api.delete(`/api/fmcg/data/sources/${id}`),
 };
 
+// ── Logistics: Data ───────────────────────────────────────────────────────────
+export const logisticsDataApi = {
+  upload: (formData) => api.post('/api/logistics/data/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  getSources: () => api.get('/api/logistics/data/sources'),
+  deleteSource: (id) => api.delete(`/api/logistics/data/sources/${id}`),
+};
+
 // ── FMCG: Dashboard ───────────────────────────────────────────────────────────
 export const dashboardApi = {
   getKPIs: () => api.get('/api/fmcg/dashboard/kpis'),
