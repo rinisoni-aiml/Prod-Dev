@@ -3,29 +3,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 
 # ── Shared routers ────────────────────────────────────────────────────────────
-from app.shared.routers import auth
+from app.routers import auth
 
 # ── FMCG routers ─────────────────────────────────────────────────────────────
-from app.industries.fmcg.routers import dashboard as fmcg_dashboard
-from app.industries.fmcg.routers import inventory as fmcg_inventory
-from app.industries.fmcg.routers import alerts as fmcg_alerts
-from app.industries.fmcg.routers import contracts as fmcg_contracts
-from app.industries.fmcg.routers import forecasting as fmcg_forecasting
-from app.industries.fmcg.routers import ai as fmcg_ai
-from app.industries.fmcg.routers import data as fmcg_data
+# All FMCG routes are prefixed /api/fmcg/<resource>
+from app.routers.fmcg import dashboard as fmcg_dashboard
+from app.routers.fmcg import inventory as fmcg_inventory
+from app.routers.fmcg import alerts as fmcg_alerts
+from app.routers.fmcg import contracts as fmcg_contracts
+from app.routers.fmcg import forecasting as fmcg_forecasting
+from app.routers.fmcg import ai as fmcg_ai
+from app.routers.fmcg import data as fmcg_data
 
 # ── Logistics routers ────────────────────────────────────────────────────────
 from app.industries.logistics.routers import data as logistics_data
+from app.industries.logistics.routers import views as logistics_views
+from app.industries.logistics.routers import upload as logistics_upload
 
 app = FastAPI(
     title="PulseIQ API",
     version="1.0.0",
     description="Multi-industry intelligence platform API — FMCG, Healthcare, Logistics and more.",
-    redirect_slashes=False,
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-origins = [settings.frontend_url.rstrip("/"), "http://localhost:5173", "http://localhost:8080"]
+origins = [settings.frontend_url, "http://localhost:5173", "http://localhost:8080"]
+if settings.environment == "production":
+    origins.append("https://*.vercel.app")
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,7 +52,9 @@ app.include_router(fmcg_ai.router,          prefix="/api/fmcg/ai",          tags
 app.include_router(fmcg_data.router,        prefix="/api/fmcg/data",        tags=["FMCG - Data"])
 
 # ── Logistics routes ──────────────────────────────────────────────────────────
-app.include_router(logistics_data.router, prefix="/api/logistics/data", tags=["Logistics - Data"])
+app.include_router(logistics_data.router,   prefix="/api/logistics/data",      tags=["Logistics - Data"])
+app.include_router(logistics_views.router,  prefix="/api/logistics/v1/views",  tags=["Logistics - Views"])
+app.include_router(logistics_upload.router, prefix="/api/logistics/v1/upload", tags=["Logistics - Upload"])
 
 
 @app.get("/")

@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { Bell, ChevronDown, LogOut, Settings, User, LayoutDashboard, TrendingUp, Package, FileText, Upload, PanelLeftClose, PanelLeft, Clock } from 'lucide-react';
+import { Bell, ChevronDown, LogOut, Settings, User, LayoutDashboard, TrendingUp, Package, FileText, Upload, PanelLeftClose, PanelLeft, Clock, AlertTriangle, Truck } from 'lucide-react';
 import { useState } from 'react';
 import Logo from '@/components/Logo';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -16,7 +16,10 @@ const fmcgNavItems = [
 ];
 
 const logisticsNavItems = [
-  { label: 'Data Upload', path: '/dashboard/logistics/data', icon: Upload },
+  { label: 'Dashboard',     path: '/dashboard/logistics',              icon: LayoutDashboard },
+  { label: 'Alert Center',  path: '/dashboard/logistics/alerts',       icon: AlertTriangle },
+  { label: 'Shipment Risk', path: '/dashboard/logistics/shipment-risk', icon: Truck },
+  { label: 'Data Upload',   path: '/dashboard/logistics/data',         icon: Upload },
 ];
 
 const navItemsByIndustry = {
@@ -28,8 +31,8 @@ const AppLayout = () => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { profile, logout } = useAuthStore();
-  const navItems = navItemsByIndustry[profile?.industry] || fmcgNavItems;
   const navigate = useNavigate();
+  const navItems = navItemsByIndustry[profile?.industry] || fmcgNavItems;
 
   const handleLogout = async () => { await logout(); navigate('/'); };
   const lastUpdated = new Date();

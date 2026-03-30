@@ -23,6 +23,7 @@ import NotFound from "./pages/NotFound";
 import { fmcgDashboardRoutes } from './industries/fmcg/routes';
 import { logisticsDashboardRoutes } from './industries/logistics/routes';
 import DashboardPage from './industries/fmcg/pages/DashboardPage';
+import { LogisticsAppProvider } from './industries/logistics/context/LogisticsAppContext';
 
 const queryClient = new QueryClient();
 
@@ -30,7 +31,7 @@ const queryClient = new QueryClient();
 const IndustryHome = () => {
   const { profile } = useAuthStore();
   if (profile?.industry === 'logistics') {
-    return <Navigate to="/dashboard/logistics/data" replace />;
+    return <Navigate to="/dashboard/logistics" replace />;
   }
   return <DashboardPage />;
 };
@@ -123,9 +124,9 @@ const App = () => (
 
             {/* ── Dashboard shell — industry pages render as children ─────── */}
             <Route path="/dashboard" element={
-              <ProtectedRoute><AppLayout /></ProtectedRoute>
+              <ProtectedRoute><LogisticsAppProvider><AppLayout /></LogisticsAppProvider></ProtectedRoute>
             }>
-                <Route index element={<IndustryHome />} />
+              <Route index element={<IndustryHome />} />
               {fmcgDashboardRoutes.filter(r => !r.index).map((route, i) =>
                 <Route key={i} path={route.path} element={route.element} />
               )}

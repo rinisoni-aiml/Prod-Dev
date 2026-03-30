@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Upload, Trash2, FileText, CheckCircle, AlertCircle, Loader2, Database } from 'lucide-react';
 import { logisticsDataApi } from '@/lib/api';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
 const formatBytes = (bytes) => {
@@ -19,6 +20,7 @@ const LogisticsDataUploadPage = () => {
   const [sources, setSources] = useState([]);
   const [loadingSources, setLoadingSources] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [loadingSample, setLoadingSample] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
   const fetchSources = useCallback(async () => {
@@ -46,16 +48,29 @@ const LogisticsDataUploadPage = () => {
       try {
         const formData = new FormData();
         formData.append('file', file);
-        await logisticsDataApi.upload(formData);
+        const res = await api.post('/api/logistics/v1/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        toast.success(`${file.name} → ${res.data?.table || 'processed'} (${res.data?.rows_inserted ?? 0} rows)`);
         successCount++;
       } catch (err) {
         toast.error(`Failed to upload ${file.name}: ${err.response?.data?.detail || err.message}`);
       }
     }
     setUploading(false);
-    if (successCount > 0) {
-      toast.success(`${successCount} file${successCount > 1 ? 's' : ''} uploaded successfully`);
+    if (successCount > 0) fetchSources();
+  }, [fetchSources]);
+
+  const handleLoadSampleData = useCallback(async () => {
+    setLoadingSample(true);
+    try {
+      const res = await api.post('/api/logistics/v1/upload/sample');
+      toast.success(res.data?.message || 'Sample data loaded successfully');
       fetchSources();
+    } catch (err) {
+      toast.error(`Failed to load sample data: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setLoadingSample(false);
     }
   }, [fetchSources]);
 
@@ -123,6 +138,27 @@ const LogisticsDataUploadPage = () => {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Sample data button */}
+      <div className="glass-card rounded-xl p-4 border border-border flex items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <Database className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-foreground">Use Sample Data</p>
+            <p className="text-xs text-foreground-secondary mt-0.5">
+              Load the pre-built logistics dataset (shipments, routes, vendors, drivers and more) to explore the platform instantly.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={!loadingSample ? handleLoadSampleData : undefined}
+          disabled={loadingSample}
+          className="flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {loadingSample ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+          {loadingSample ? 'Loading…' : 'Load Sample Data'}
+        </button>
       </div>
 
       {/* Info box */}
