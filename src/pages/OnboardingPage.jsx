@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Upload, AlertCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Upload, AlertCircle, Factory, GraduationCap, Activity, Building2, Truck, CreditCard, Lock } from 'lucide-react';
 import Logo from '@/components/Logo';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/lib/supabase';
@@ -24,12 +24,12 @@ const OnboardingPage = () => {
   const roles = ['Founder/CEO', 'Operations Head', 'Supply Chain Manager', 'Data Analyst', 'Other'];
 
   const industries = [
-    { icon: '🏭', name: 'FMCG', desc: 'Demand forecasting & inventory intelligence' },
-    { icon: '🎓', name: 'Education', desc: 'Student analytics & retention' },
-    { icon: '🏥', name: 'Healthcare', desc: 'Patient risk & ops analysis' },
-    { icon: '🏠', name: 'Real Estate', desc: 'Lead scoring & deal intelligence' },
-    { icon: '🚚', name: 'Logistics', desc: 'Delivery & efficiency insights' },
-    { icon: '💳', name: 'FinTech', desc: 'Credit risk & anomaly detection' },
+    { icon: Factory, name: 'FMCG', desc: 'Demand forecasting & inventory intelligence', live: true },
+    { icon: GraduationCap, name: 'Education', desc: 'Student analytics & retention', live: false },
+    { icon: Activity, name: 'Healthcare', desc: 'Patient risk & ops analysis', live: false },
+    { icon: Building2, name: 'Real Estate', desc: 'Lead scoring & deal intelligence', live: false },
+    { icon: Truck, name: 'Logistics', desc: 'Delivery & efficiency insights', live: true },
+    { icon: CreditCard, name: 'FinTech', desc: 'Credit risk & anomaly detection', live: false },
   ];
 
   const handleStep1 = () => {
@@ -179,19 +179,28 @@ const OnboardingPage = () => {
               <h2 className="text-2xl font-bold text-foreground mb-2">Which industry are you in?</h2>
               <p className="text-foreground-secondary mb-6">PulseIQ adapts its intelligence to your domain.</p>
               <div className="grid grid-cols-2 gap-3">
-                {industries.map(({ icon, name, desc }) => (
+                {industries.map(({ icon: Icon, name, desc, live }) => (
                   <button key={name}
-                    onClick={() => setIndustry(name.toLowerCase())}
+                    onClick={() => live && setIndustry(name.toLowerCase())}
+                    disabled={!live}
                     className={`p-4 rounded-xl border text-left transition-all ${
-                      industry === name.toLowerCase()
-                        ? 'border-primary shadow-[var(--shadow-glow-primary)] bg-primary/5'
-                        : 'border-border hover:border-primary/30 glass-card'
+                      !live
+                        ? 'border-border opacity-50 cursor-not-allowed glass-card'
+                        : industry === name.toLowerCase()
+                          ? 'border-primary shadow-[var(--shadow-glow-primary)] bg-primary/5'
+                          : 'border-border hover:border-primary/30 glass-card'
                     }`}
                   >
-                    <span className="text-2xl">{icon}</span>
+                    <div className={`h-9 w-9 rounded-lg flex items-center justify-center ${live ? 'bg-primary/10' : 'bg-muted'}`}>
+                      <Icon className={`h-5 w-5 ${live ? 'text-primary' : 'text-foreground-secondary'}`} />
+                    </div>
                     <h3 className="font-semibold text-foreground text-sm mt-2">{name}</h3>
                     <p className="text-xs text-foreground-secondary mt-1">{desc}</p>
-                    <span className="text-xs text-success font-medium mt-2 block">✅ Available</span>
+                    {live ? (
+                      <span className="text-xs text-success font-semibold mt-2 block">LIVE NOW</span>
+                    ) : (
+                      <span className="text-xs text-foreground-secondary font-medium mt-2 flex items-center gap-1"><Lock className="h-3 w-3" /> Coming Soon</span>
+                    )}
                   </button>
                 ))}
               </div>

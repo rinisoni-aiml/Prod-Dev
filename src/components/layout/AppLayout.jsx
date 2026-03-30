@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import AIChatDrawer from '@/components/chat/AIChatDrawer';
 import AIChatFAB from '@/components/chat/AIChatFAB';
 
-const navItems = [
+const fmcgNavItems = [
   { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
   { label: 'Forecasting', path: '/dashboard/forecasting', icon: TrendingUp },
   { label: 'Inventory', path: '/dashboard/inventory', icon: Package },
@@ -15,10 +15,20 @@ const navItems = [
   { label: 'Data Upload', path: '/dashboard/data', icon: Upload },
 ];
 
+const logisticsNavItems = [
+  { label: 'Data Upload', path: '/dashboard/logistics/data', icon: Upload },
+];
+
+const navItemsByIndustry = {
+  fmcg: fmcgNavItems,
+  logistics: logisticsNavItems,
+};
+
 const AppLayout = () => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { profile, logout } = useAuthStore();
+  const navItems = navItemsByIndustry[profile?.industry] || fmcgNavItems;
   const navigate = useNavigate();
 
   const handleLogout = async () => { await logout(); navigate('/'); };
