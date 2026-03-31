@@ -122,8 +122,8 @@ def train_model(df: pd.DataFrame):
 
     if len(train) >= 21:
         model = xgb.XGBRegressor(
-            n_estimators=300,
-            learning_rate=0.08,
+            n_estimators=100,
+            learning_rate=0.1,
             max_depth=4,
             subsample=0.8,
             colsample_bytree=0.8,
@@ -291,7 +291,7 @@ def run_forecast_for_sku(df_sku: pd.DataFrame, periods: int) -> dict:
         return {"error": str(e)}
 
 
-def run_all_skus_forecast(df: pd.DataFrame, periods: int, max_skus: int = 30) -> dict:
+def run_all_skus_forecast(df: pd.DataFrame, periods: int, max_skus: int = 20) -> dict:
     """
     Run the forecast pipeline for every SKU in the DataFrame plus the
     'All Products' aggregate.  Returns:
