@@ -1,11 +1,11 @@
 export default function PageHeader({ title, subtitle, icon }) {
   return (
-    <div className="page-header">
-      <h1 className="page-title">
+    <div className="mb-6">
+      <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
         {icon && <span>{icon}</span>}
         {title}
       </h1>
-      {subtitle && <div className="page-subtitle">{subtitle}</div>}
+      {subtitle && <p className="text-sm text-foreground-secondary mt-1">{subtitle}</p>}
     </div>
   );
 }

@@ -290,7 +290,7 @@ async def get_compliance_view(current_user=Depends(get_current_user)):
     try:
         trucks_resp = (
             supabase.table("lg_trucks")
-            .select("truck_id, truck_number, truck_type, truck_status, insurance_expiry_date, fitness_expiry_date, registration_expiry_date")
+            .select("truck_id, truck_number, vehicle_type, truck_status, insurance_expiry_date, fitness_expiry_date, registration_expiry_date")
             .eq("user_id", uid)
             .execute()
         )
@@ -336,7 +336,7 @@ async def get_compliance_view(current_user=Depends(get_current_user)):
             truck_rows.append({
                 "id": t.get("truck_id"),
                 "asset": t.get("truck_number") or t.get("truck_id"),
-                "type": t.get("truck_type", "Unknown"),
+                "type": t.get("vehicle_type", "Unknown"),
                 "status": t.get("truck_status", "ACTIVE"),
                 "risk_score": 85 if sev == "critical" else 70 if sev == "high" else 50 if sev == "medium" else 20,
                 "risk_label": risk_label,
@@ -411,13 +411,13 @@ async def get_risk_analytics_view(current_user=Depends(get_current_user)):
 
         snap_resp = (
             supabase.table("lg_shipment_risk_snapshots")
-            .select("shipment_id, overall_risk_score, vendor_risk_score, vendor_id")
+            .select("shipment_id, overall_risk_score, vendor_risk_score")
             .eq("user_id", uid)
             .execute()
         )
         snaps_by_ship = {str(s["shipment_id"]): s for s in (snap_resp.data or [])}
 
-        # Top routes
+        # Top routes — build from shipments + snapshots
         route_map: dict[str, dict] = {}
         for ship in shipments:
             route = f"{ship.get('origin_city','?')} → {ship.get('destination_city','?')}"
@@ -433,7 +433,7 @@ async def get_risk_analytics_view(current_user=Depends(get_current_user)):
             avg = sum(info["scores"]) / len(info["scores"]) if info["scores"] else 0
             top_routes.append({"name": name, "risk_score": round(avg, 1), "shipments": info["count"], "risk_level": _risk_level(avg)})
 
-        # Vendor comparison
+        # Vendor comparison — vendor risk score from shipments lookup
         vendors_resp = (
             supabase.table("lg_vendors")
             .select("vendor_id, vendor_name")
@@ -442,17 +442,20 @@ async def get_risk_analytics_view(current_user=Depends(get_current_user)):
         )
         vendors = vendors_resp.data or []
 
+        # Build vendor → risk scores via shipments (vendor_id is on shipments table)
         vendor_snaps: dict[str, list] = {}
-        for snap in (snap_resp.data or []):
-            vid = str(snap.get("vendor_id") or "")
+        for ship in shipments:
+            vid = str(ship.get("vendor_id") or "")
+            snap = snaps_by_ship.get(str(ship.get("shipment_id")), {})
+            vs = _safe_float(snap.get("vendor_risk_score"))
             if vid:
-                vendor_snaps.setdefault(vid, []).append(_safe_float(snap.get("vendor_risk_score")))
+                vendor_snaps.setdefault(vid, []).append(vs)
 
         vpm_resp = (
             supabase.table("lg_vendor_performance_metrics")
-            .select("vendor_id, on_time_pct, delay_rate_pct, window_days")
+            .select("vendor_id, on_time_percentage, delay_rate_percentage, performance_window")
             .eq("user_id", uid)
-            .order("window_days", desc=True)
+            .order("calculation_date", desc=True)
             .execute()
         )
         vpm_by_vendor: dict[str, dict] = {}
@@ -470,21 +473,30 @@ async def get_risk_analytics_view(current_user=Depends(get_current_user)):
             vendor_comparison.append({
                 "vendor_name": v.get("vendor_name") or vid,
                 "risk_score": round(avg_risk, 1),
-                "delay_rate_pct": _safe_float(vpm.get("delay_rate_pct")),
-                "on_time_pct": _safe_float(vpm.get("on_time_pct")),
+                "delay_rate_pct": _safe_float(vpm.get("delay_rate_percentage")),
+                "on_time_pct": _safe_float(vpm.get("on_time_percentage")),
             })
         vendor_comparison.sort(key=lambda x: -x["risk_score"])
 
-        # Market volatility
+        # Market volatility — join route_id with lg_routes for readable names
+        routes_resp = (
+            supabase.table("lg_routes")
+            .select("route_id, origin_city, destination_city")
+            .eq("user_id", uid)
+            .execute()
+        )
+        route_names = {str(r.get("route_id")): f"{r.get('origin_city','?')} → {r.get('destination_city','?')}" for r in (routes_resp.data or [])}
+
         mfi_resp = (
             supabase.table("lg_market_freight_intelligence")
-            .select("origin_city, destination_city, volatility_index")
+            .select("route_id, volatility_index")
             .eq("user_id", uid)
             .execute()
         )
         mfi_map: dict[str, list] = {}
         for row in (mfi_resp.data or []):
-            name = f"{row.get('origin_city','?')} → {row.get('destination_city','?')}"
+            rid = str(row.get("route_id") or "")
+            name = route_names.get(rid) or f"Route {rid}"
             mfi_map.setdefault(name, []).append(_safe_float(row.get("volatility_index")))
         market_volatility = sorted(
             [{"name": k, "volatility": round(sum(v) / len(v), 3)} for k, v in mfi_map.items()],
@@ -585,16 +597,16 @@ async def get_vendor_intel_view(
 
             vpm_resp = (
                 supabase.table("lg_vendor_performance_metrics")
-                .select("on_time_pct, delay_rate_pct")
+                .select("on_time_percentage, delay_rate_percentage")
                 .eq("user_id", uid)
                 .eq("vendor_id", str(target_id))
-                .order("window_days", desc=True)
+                .order("calculation_date", desc=True)
                 .limit(1)
                 .execute()
             )
             vpm = (vpm_resp.data or [{}])[0]
-            on_time = _safe_float(vpm.get("on_time_pct"), 0.0)
-            delay_rate = _safe_float(vpm.get("delay_rate_pct"), 0.0)
+            on_time = _safe_float(vpm.get("on_time_percentage"), 0.0)
+            delay_rate = _safe_float(vpm.get("delay_rate_percentage"), 0.0)
 
             snap_by_ship = {str(r["shipment_id"]): r for r in risk_rows}
             flags = []

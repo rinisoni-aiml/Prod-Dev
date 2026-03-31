@@ -15,39 +15,28 @@ import {
 // ── Simple SVG Gauge ──────────────────────────────────────────────────────────
 function RiskGauge({ score, color }) {
   const pct = Math.max(0, Math.min(score, 100));
-  // Semicircle: sweep from 180° to 0° (left to right)
-  const r = 80;
-  const cx = 100;
-  const cy = 100;
-  const startAngle = Math.PI;           // 180° in radians
-  const endAngle = 0;                   // 0° = rightmost
+  const r = 80, cx = 100, cy = 100;
+  const startAngle = Math.PI;
+  const endAngle = 0;
   const sweepAngle = startAngle - (startAngle - endAngle) * (pct / 100);
-
   const x1 = cx + r * Math.cos(startAngle);
   const y1 = cy + r * Math.sin(startAngle);
   const x2 = cx + r * Math.cos(sweepAngle);
   const y2 = cy + r * Math.sin(sweepAngle);
-
-  const trackX1 = cx + r * Math.cos(startAngle);
-  const trackY1 = cy + r * Math.sin(startAngle);
   const trackX2 = cx + r * Math.cos(endAngle);
   const trackY2 = cy + r * Math.sin(endAngle);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "16px 0" }}>
-      <svg viewBox="0 0 200 115" style={{ width: "100%", maxWidth: "260px" }}>
-        {/* Zone backgrounds */}
+    <div className="flex flex-col items-center py-4">
+      <svg viewBox="0 0 200 115" className="w-full max-w-[260px]">
         <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
           fill="none" stroke="rgba(16,185,129,0.15)" strokeWidth="18" />
-        {/* Track */}
-        <path d={`M ${trackX1} ${trackY1} A ${r} ${r} 0 0 1 ${trackX2} ${trackY2}`}
+        <path d={`M ${x1} ${y1} A ${r} ${r} 0 0 1 ${trackX2} ${trackY2}`}
           fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="14" strokeLinecap="round" />
-        {/* Value arc */}
         {pct > 0 && (
           <path d={`M ${x1} ${y1} A ${r} ${r} 0 ${sweepAngle < Math.PI / 2 ? 1 : 0} 0 ${x2} ${y2}`}
             fill="none" stroke={color} strokeWidth="14" strokeLinecap="round" />
         )}
-        {/* Score text */}
         <text x={cx} y={cy - 4} textAnchor="middle" fontSize="32" fontWeight="700"
           fill={color} fontFamily="Sora, sans-serif">{score.toFixed(0)}</text>
         <text x={cx} y={cy + 16} textAnchor="middle" fontSize="11" fill="#94A3B8">/100</text>
@@ -92,7 +81,6 @@ export default function ShipmentRisk() {
 
   useEffect(() => {
     let ignore = false;
-
     const init = async () => {
       try {
         const response = await getShipmentRiskView(null, 300);
@@ -101,21 +89,14 @@ export default function ShipmentRisk() {
         if (!ignore) {
           setShipments(nextShipments);
           setSelected(payload.selected || null);
-          if (nextShipments.length) {
-            setSelectedShipmentId(String(nextShipments[0].shipment_id));
-          }
+          if (nextShipments.length) setSelectedShipmentId(String(nextShipments[0].shipment_id));
           setLoading(false);
         }
       } catch (requestError) {
-        if (!ignore) {
-          setError(requestError?.message || "Failed to load shipment risk data.");
-          setLoading(false);
-        }
+        if (!ignore) { setError(requestError?.message || "Failed to load shipment risk data."); setLoading(false); }
       }
     };
-
     init();
-
     return () => { ignore = true; };
   }, []);
 
@@ -123,10 +104,7 @@ export default function ShipmentRisk() {
   const filteredShipments = useMemo(() => {
     const query = shipmentSearch.trim().toLowerCase();
     if (!query) return shipments;
-    return shipments.filter((shipment) => {
-      const haystack = `${shipment.origin_city || ""} ${shipment.destination_city || ""}`.toLowerCase();
-      return haystack.includes(query);
-    });
+    return shipments.filter((s) => `${s.origin_city || ""} ${s.destination_city || ""}`.toLowerCase().includes(query));
   }, [shipments, shipmentSearch]);
 
   const overallRisk = toNumber(selected?.risk_score);
@@ -140,9 +118,7 @@ export default function ShipmentRisk() {
     if (!deadline) return null;
     const dt = new Date(deadline);
     if (Number.isNaN(dt.getTime())) return null;
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    dt.setHours(0, 0, 0, 0);
+    const now = new Date(); now.setHours(0, 0, 0, 0); dt.setHours(0, 0, 0, 0);
     return Math.round((dt.getTime() - now.getTime()) / 86400000);
   })();
 
@@ -152,33 +128,29 @@ export default function ShipmentRisk() {
     ["Vendor",      toNumber(selected?.components?.vendor_score)],
     ["Compliance",  toNumber(selected?.components?.compliance_score)],
   ];
-
-  const highestComponent = [...breakdown].sort((a, b) => b[1] - a[1])[0] || ["Operational", 0];
-  const secondComponent  = [...breakdown].sort((a, b) => b[1] - a[1])[1] || ["Vendor", 0];
+  const sorted = [...breakdown].sort((a, b) => b[1] - a[1]);
+  const highestComponent = sorted[0] || ["Operational", 0];
+  const secondComponent  = sorted[1] || ["Vendor", 0];
 
   const factors = [
     {
       title: "Primary Exposure Driver",
       description: `${highestComponent[0]} contributes ${highestComponent[1].toFixed(1)} points to the total ${overallRisk.toFixed(1)} risk score (${riskCategoryText}). This is currently the dominant risk lever for this shipment.`,
-      icon: "📌",
-      color: "rgba(239,68,68,0.16)",
+      icon: "📌", bg: "bg-red-500/10 border-red-500/20",
     },
     {
       title: "Secondary Risk Pressure",
       description: `${secondComponent[0]} is the second-highest contributor at ${secondComponent[1].toFixed(1)} points. Coordinated action on the top two components will reduce score faster than isolated interventions.`,
-      icon: "📊",
-      color: "rgba(245,158,11,0.16)",
+      icon: "📊", bg: "bg-orange-500/10 border-orange-500/20",
     },
     {
       title: "Service-Level Outlook",
-      description:
-        etaDays == null
-          ? `Current shipment status is ${String(selectedShipment?.shipment_status || "UNKNOWN").replaceAll("_", " ")}. Deadline data is unavailable, so SLA exposure is being monitored through live status transitions.`
-          : etaDays >= 0
-            ? `Delivery deadline is in ${etaDays} day(s). Keep carrier and route controls active to protect on-time commitment and avoid avoidable cost escalation.`
-            : `Delivery deadline is overdue by ${Math.abs(etaDays)} day(s). Escalation protocol should stay active until milestone recovery is confirmed.`,
-      icon: "🧭",
-      color: "rgba(59,130,246,0.16)",
+      description: etaDays == null
+        ? `Current shipment status is ${String(selectedShipment?.shipment_status || "UNKNOWN").replaceAll("_", " ")}. Deadline data is unavailable, so SLA exposure is being monitored through live status transitions.`
+        : etaDays >= 0
+          ? `Delivery deadline is in ${etaDays} day(s). Keep carrier and route controls active to protect on-time commitment.`
+          : `Delivery deadline is overdue by ${Math.abs(etaDays)} day(s). Escalation protocol should stay active until milestone recovery is confirmed.`,
+      icon: "🧭", bg: "bg-blue-500/10 border-blue-500/20",
     },
   ];
 
@@ -193,162 +165,157 @@ export default function ShipmentRisk() {
           setShipments(payload.shipments || []);
           setSelected(payload.selected || null);
         }
-      } catch {
-        // Keep current state on transient failures.
-      }
+      } catch { /* Keep current state on transient failures. */ }
     };
     refreshSelection();
     return () => { ignore = true; };
   }, [selectedShipmentId]);
 
   return (
-    <div className="logistics-root">
+    <div className="p-6 space-y-5">
       <PageHeader title="Shipment Risk" subtitle="Detailed risk breakdown for individual shipments" icon="📦" />
 
       {loading ? (
-        <div className="panel">
-          <div className="panel-body">
-            <div className="loading-spinner">Loading shipment risk profile...</div>
-          </div>
-        </div>
-      ) : error && !selectedShipment ? (
-        <div className="panel">
-          <div className="panel-body">
-            <div className="upload-error">{error}</div>
-          </div>
-        </div>
+        <div className="glass-card rounded-xl p-8 text-center text-foreground-secondary text-sm">Loading shipment risk profile...</div>
+      ) : error && !selectedShipment?.shipment_id ? (
+        <div className="glass-card rounded-xl p-6 border border-destructive/30 text-destructive text-sm">{error}</div>
       ) : (
         <>
-          <div className="filter-bar" style={{ marginBottom: "16px" }}>
+          {/* Search + selector */}
+          <div className="flex flex-wrap gap-3">
             <input
               type="search"
               placeholder="Search by origin or destination city"
               value={shipmentSearch}
               onChange={(e) => setShipmentSearch(e.target.value)}
+              className="flex-1 min-w-[180px] bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder-foreground-secondary focus:outline-none focus:ring-1 focus:ring-primary"
             />
-            <select value={selectedShipmentId} onChange={(e) => setSelectedShipmentId(e.target.value)}>
-              {filteredShipments.map((shipment) => (
-                <option key={shipment.shipment_id} value={shipment.shipment_id}>
-                  {shipment.origin_city || "Unknown"} → {shipment.destination_city || "Unknown"} | #{shipment.shipment_id}
+            <select
+              value={selectedShipmentId}
+              onChange={(e) => setSelectedShipmentId(e.target.value)}
+              className="flex-1 min-w-[260px] bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              {filteredShipments.map((s) => (
+                <option key={s.shipment_id} value={s.shipment_id}>
+                  {s.origin_city || "Unknown"} → {s.destination_city || "Unknown"} | #{s.shipment_id}
                 </option>
               ))}
             </select>
           </div>
 
-          {error ? <div className="upload-error" style={{ marginBottom: "16px" }}>{error}</div> : null}
+          {error && (
+            <div className="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-2">{error}</div>
+          )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "16px", marginBottom: "16px" }}>
-            <div className="kpi-card">
-              <div className="kpi-label">Shipment ID</div>
-              <div className="kpi-value">#{selectedShipment?.shipment_id}</div>
-              <div className="kpi-delta neutral">
-                <span style={{ color: getStatusColor(selectedShipment?.shipment_status) }}>
+          {/* KPI row */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              {
+                label: "Shipment ID",
+                value: `#${selectedShipment?.shipment_id}`,
+                sub: <span style={{ color: getStatusColor(selectedShipment?.shipment_status) }} className="font-medium">
                   {String(selectedShipment?.shipment_status || "UNKNOWN").replaceAll("_", " ")}
-                </span>
+                </span>,
+              },
+              {
+                label: "Route",
+                value: routeName,
+                valueClass: "text-lg",
+                sub: <span className="text-foreground-secondary">{currentCarrier}</span>,
+              },
+              {
+                label: "Shipment Value",
+                value: formatCompactCurrency(selectedShipment?.shipment_value),
+                valueClass: "text-lg",
+                sub: <span className="text-foreground-secondary">Delivery target {formatDate(selectedShipment?.delivery_deadline)}</span>,
+              },
+              {
+                label: "Risk Category",
+                value: overallRisk.toFixed(0),
+                valueStyle: { color: riskColor },
+                sub: <Badge text={riskCategoryText} level={riskCategoryLevel} />,
+              },
+            ].map((kpi) => (
+              <div key={kpi.label} className="glass-card rounded-xl p-4 border border-border">
+                <div className="text-xs text-foreground-secondary font-medium uppercase tracking-wide mb-2">{kpi.label}</div>
+                <div className={`text-2xl font-bold text-foreground ${kpi.valueClass || ""}`} style={kpi.valueStyle}>{kpi.value}</div>
+                <div className="text-xs mt-1">{kpi.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Gauge + Breakdown */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="glass-card rounded-xl border border-border p-5">
+              <div className="text-sm font-semibold text-foreground mb-1">Overall Risk Score</div>
+              <RiskGauge score={overallRisk} color={riskColor} />
+              <div className="text-center text-xs text-foreground-secondary mt-1">
+                Current category: <span className="font-bold" style={{ color: riskColor }}>{riskCategoryText}</span>
               </div>
             </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Route</div>
-              <div className="kpi-value" style={{ fontSize: "18px" }}>
-                {selectedShipment?.origin_city || "Unknown"} → {selectedShipment?.destination_city || "Unknown"}
-              </div>
-              <div className="kpi-delta neutral">{selectedShipment?.vendor_name || "No carrier assigned"}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Shipment Value</div>
-              <div className="kpi-value" style={{ fontSize: "18px" }}>{formatCompactCurrency(selectedShipment?.shipment_value)}</div>
-              <div className="kpi-delta neutral">Delivery target {formatDate(selectedShipment?.delivery_deadline)}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Risk Category</div>
-              <div className="kpi-value" style={{ color: riskColor }}>{overallRisk.toFixed(0)}</div>
-              <div className="kpi-delta neutral"><Badge text={riskCategoryText} level={riskCategoryLevel} /></div>
+
+            <div className="glass-card rounded-xl border border-border p-5">
+              <div className="text-sm font-semibold text-foreground mb-0.5">Risk Breakdown</div>
+              <div className="text-xs text-foreground-secondary mb-3">Component-level contribution</div>
+              <RiskBreakdownChart breakdown={breakdown} />
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 0.95fr) minmax(0, 1.2fr)", gap: "16px", marginBottom: "16px" }}>
-            <div className="panel">
-              <div className="panel-header">
-                <div className="panel-title">Overall Risk Score</div>
-              </div>
-              <div className="panel-body">
-                <RiskGauge score={overallRisk} color={riskColor} />
-                <div style={{ textAlign: "center", color: "var(--text-2)", fontSize: "12px" }}>
-                  Current category:{" "}
-                  <span style={{ color: riskColor, fontWeight: 700 }}>{riskCategoryText}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="panel">
-              <div className="panel-header">
-                <div className="panel-title">Risk Breakdown</div>
-                <div className="panel-meta">Component-level contribution</div>
-              </div>
-              <div className="panel-body">
-                <RiskBreakdownChart breakdown={breakdown} />
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: "16px" }}>
-            <div className="panel">
-              <div className="panel-header">
-                <div className="panel-title">Active Risk Factors</div>
-              </div>
-              <div className="panel-body">
+          {/* Risk Factors + Mitigation */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="glass-card rounded-xl border border-border p-5">
+              <div className="text-sm font-semibold text-foreground mb-4">Active Risk Factors</div>
+              <div className="space-y-3">
                 {factors.map((factor) => (
-                  <div key={factor.title} className="risk-factor">
-                    <div className="risk-factor-icon" style={{ background: factor.color }}>{factor.icon}</div>
+                  <div key={factor.title} className={`flex gap-3 rounded-xl border p-4 ${factor.bg}`}>
+                    <span className="text-xl flex-shrink-0 mt-0.5">{factor.icon}</span>
                     <div>
-                      <div className="risk-factor-title">{factor.title}</div>
-                      <div className="risk-factor-desc">{factor.description}</div>
+                      <div className="text-xs font-semibold text-foreground mb-1">{factor.title}</div>
+                      <div className="text-xs text-foreground-secondary leading-relaxed">{factor.description}</div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="panel">
-              <div className="panel-header">
-                <div className="panel-title">🤖 AI Recommended Mitigation</div>
-              </div>
-              <div className="panel-body">
-                <div className="mitigation-block">
-                  <div className="mitigation-summary">
-                    {selected?.recommendation || "Execute reroute and backup carrier strategy to reduce operational volatility while protecting delivery SLA."}
+            <div className="glass-card rounded-xl border border-border p-5">
+              <div className="text-sm font-semibold text-foreground mb-4">🤖 AI Recommended Mitigation</div>
+              <div className="space-y-4">
+                <p className="text-xs text-foreground-secondary leading-relaxed">
+                  {selected?.recommendation || "Execute reroute and backup carrier strategy to reduce operational volatility while protecting delivery SLA."}
+                </p>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: "Proposed Route",       value: `🛣️ ${routeName}` },
+                    { label: "Est. Delay Avoidance", value: "✅ Saves 24–48h", cls: "text-green-400" },
+                    { label: "Alternative Carrier",  value: `🚚 ${currentCarrier}` },
+                    { label: "Financial Impact",     value: "↑ +₹4,200 (Freight)", cls: "text-yellow-400" },
+                  ].map((item) => (
+                    <div key={item.label} className="bg-muted/60 rounded-lg p-3">
+                      <div className="text-[10px] uppercase tracking-widest text-foreground-secondary font-bold mb-1">{item.label}</div>
+                      <div className={`text-xs font-semibold ${item.cls || "text-foreground"}`}>{item.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs font-medium text-foreground">
+                    <span>AI Confidence Score</span>
+                    <span>92%</span>
                   </div>
-                  <div className="mitigation-grid">
-                    <div>
-                      <div className="mitigation-label">Proposed Route</div>
-                      <div className="mitigation-value">🛣️ {routeName}</div>
-                    </div>
-                    <div>
-                      <div className="mitigation-label">Est. Delay Avoidance</div>
-                      <div className="mitigation-value good">✅ Saves 24-48h</div>
-                    </div>
-                    <div>
-                      <div className="mitigation-label">Alternative Carrier</div>
-                      <div className="mitigation-value">🚚 {currentCarrier}</div>
-                    </div>
-                    <div>
-                      <div className="mitigation-label">Financial Impact</div>
-                      <div className="mitigation-value warn">↑ +₹4,200 (Freight)</div>
-                    </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div className="h-full rounded-full gradient-brand" style={{ width: "92%" }} />
                   </div>
-                  <div className="mitigation-confidence">
-                    <div className="mitigation-confidence-head">
-                      <span>AI Confidence Score</span>
-                      <span>92%</span>
-                    </div>
-                    <div className="mitigation-confidence-bar">
-                      <div className="mitigation-confidence-fill" />
-                    </div>
-                  </div>
-                  <div className="mitigation-actions">
-                    <button type="button" className="mitigation-btn">📞 Contact Carrier</button>
-                    <button type="button" className="primary mitigation-btn">🚀 Execute Reroute Plan</button>
-                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button type="button" className="flex-1 px-4 py-2 rounded-lg text-xs font-medium border border-border text-foreground-secondary hover:bg-muted transition-colors">
+                    📞 Contact Carrier
+                  </button>
+                  <button type="button" className="flex-1 px-4 py-2 rounded-lg text-xs font-medium gradient-brand text-white hover:opacity-90 transition-opacity">
+                    🚀 Execute Reroute Plan
+                  </button>
                 </div>
               </div>
             </div>
