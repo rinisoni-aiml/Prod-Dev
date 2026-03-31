@@ -7,8 +7,16 @@ from app.services.fmcg.inventory_optimizer import (
     run_inventory_optimization,
 )
 from datetime import datetime, timezone
+from pathlib import Path
+import io
+import pandas as pd
 
 router = APIRouter()
+
+# Path to bundled sample CSVs on the server filesystem
+_FMCG_SAMPLE_DIR = Path(__file__).resolve().parent.parent.parent / "industries" / "fmcg" / "data"
+_LOCAL_SAMPLE_PREFIX = "_local_sample/fmcg/"
+_SALES_NROWS = 5000
 
 
 # ─── DB persistence helpers ───────────────────────────────────────────────────
@@ -156,8 +164,38 @@ async def optimize_inventory(body: OptimizeRequest, current_user=Depends(get_cur
         if not storage_path:
             raise HTTPException(status_code=400, detail="File has no storage path recorded")
 
-        # Download and parse
-        file_bytes = supabase.storage.from_("data-files").download(storage_path)
+        # If the selected file is a supplementary file (no date/units), find the sales file
+        if not column_mapping.get("date") or not column_mapping.get("units_sold"):
+            all_files = supabase.table("data_files").select("*").eq("user_id", uid).execute().data or []
+            sales_meta = next(
+                (f for f in all_files
+                 if (f.get("column_mapping") or {}).get("date")
+                 and (f.get("column_mapping") or {}).get("units_sold")),
+                None,
+            )
+            if sales_meta is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="The selected file has no date/units columns. Please select a sales data file."
+                )
+            storage_path = sales_meta.get("storage_path")
+            column_mapping = sales_meta.get("column_mapping") or {}
+            filename = sales_meta.get("file_name", "file.csv")
+
+        # For sample files, read from local disk instead of Supabase Storage
+        if storage_path.startswith(_LOCAL_SAMPLE_PREFIX):
+            local_filename = storage_path[len(_LOCAL_SAMPLE_PREFIX):]
+            local_path = _FMCG_SAMPLE_DIR / local_filename
+            if not local_path.exists():
+                raise HTTPException(status_code=404, detail=f"Sample file not found on server: {local_filename}")
+            file_bytes = local_path.read_bytes()
+            if local_filename == "sales_orders_complete.csv":
+                df_trim = pd.read_csv(io.BytesIO(file_bytes), nrows=_SALES_NROWS)
+                file_bytes = df_trim.to_csv(index=False).encode()
+            filename = local_filename
+        else:
+            file_bytes = supabase.storage.from_("data-files").download(storage_path)
+
         df = parse_file_for_optimization(file_bytes, filename, column_mapping)
 
         # Run optimization
