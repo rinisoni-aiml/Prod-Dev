@@ -52,7 +52,7 @@ const AppLayout = () => {
         </div>
         <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto scrollbar-thin">
           {navItems.map(({ label, path, icon: Icon }) => (
-            <NavLink key={path} to={path} end={path === '/dashboard'} title={sidebarCollapsed ? label : undefined}
+            <NavLink key={path} to={path} end title={sidebarCollapsed ? label : undefined}
               className={({ isActive }) => `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${isActive ? 'gradient-brand !text-white shadow-sm' : 'text-foreground-secondary hover:text-foreground hover:bg-muted'} ${sidebarCollapsed ? 'justify-center' : ''}`}>
               <Icon className="h-4 w-4 flex-shrink-0" />{!sidebarCollapsed && <span>{label}</span>}
             </NavLink>
@@ -78,7 +78,7 @@ const AppLayout = () => {
         </header>
         <main className="flex-1 pb-16 md:pb-0"><Outlet /></main>
       </div>
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 glass-card border-t"><div className="flex items-center justify-around h-14">{navItems.slice(0, 4).map(({ label, path, icon: Icon }) => (<NavLink key={path} to={path} end={path === '/dashboard'} className={({ isActive }) => `flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] font-medium transition-colors ${isActive ? 'text-primary' : 'text-foreground-secondary'}`}><Icon className="h-4 w-4" />{label.split(' ')[0]}</NavLink>))}</div></nav>
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 glass-card border-t"><div className="flex items-center justify-around h-14">{navItems.slice(0, 4).map(({ label, path, icon: Icon }) => (<NavLink key={path} to={path} end className={({ isActive }) => `flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] font-medium transition-colors ${isActive ? 'text-primary' : 'text-foreground-secondary'}`}><Icon className="h-4 w-4" />{label.split(' ')[0]}</NavLink>))}</div></nav>
       <AIChatFAB /><AIChatDrawer />
     </div>
   );
