@@ -15,8 +15,8 @@ from app.industries.logistics.utils.excel_processor import process_file, detect_
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Path to the bundled sample dataset (relative to the project root)
-SAMPLE_DATA_DIR = Path(__file__).parents[5] / "New logistic dataset"
+# Path to the bundled sample dataset
+SAMPLE_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 # Ordered list of sample files to load (dependency order matters for FK-ish relationships)
 SAMPLE_FILES_ORDER = [
@@ -96,12 +96,32 @@ async def upload_file(
 async def load_sample_data(current_user=Depends(get_current_user)):
     """
     Load the bundled sample logistics dataset for the current user.
-    Processes all files in the 'New logistic dataset' folder.
+    Idempotent — if sample files are already loaded, returns the existing records
+    without re-processing (avoids duplicating rows in lg_* tables).
+    Also writes data_files records so files appear in the Data Upload page.
     """
     uid = str(current_user.id)
 
     if not SAMPLE_DATA_DIR.exists():
         raise HTTPException(status_code=500, detail=f"Sample dataset directory not found: {SAMPLE_DATA_DIR}")
+
+    # Idempotency check — if sample records already exist for this user, return early
+    try:
+        all_records = supabase.table("data_files").select("*").eq("user_id", uid).execute().data or []
+        sample_records = [f for f in all_records if (f.get("column_mapping") or {}).get("__sample__")]
+        if sample_records:
+            total = sum(r.get("row_count") or 0 for r in sample_records)
+            return {
+                "success": True,
+                "message": f"Sample data already loaded ({len(sample_records)} files, {total} rows).",
+                "results": [
+                    {"file": r["file_name"], "table": (r.get("column_mapping") or {}).get("__table__"),
+                     "rows_inserted": r.get("row_count") or 0, "success": True}
+                    for r in sample_records
+                ],
+            }
+    except Exception:
+        pass
 
     results = []
     for filename in SAMPLE_FILES_ORDER:
@@ -112,13 +132,41 @@ async def load_sample_data(current_user=Depends(get_current_user)):
         try:
             content = filepath.read_bytes()
             result = process_file(content, filename, uid, supabase)
+            rows_inserted = result.get("rows_inserted", 0)
+            table_name = result.get("table")
             results.append({
                 "file": filename,
-                "table": result.get("table"),
-                "rows_inserted": result.get("rows_inserted", 0),
+                "table": table_name,
+                "rows_inserted": rows_inserted,
                 "success": result.get("success", False),
                 "error": result.get("error"),
             })
+
+            # Write a data_files record so the file appears in the Data Upload page
+            if result.get("success"):
+                try:
+                    record = {
+                        "user_id": uid,
+                        "file_name": filename,
+                        "storage_path": f"logistics/{uid}/sample/{filename}",
+                        "file_size": len(content),
+                        "row_count": rows_inserted,
+                        "column_mapping": {
+                            "__table__": table_name,
+                            "__purpose__": "logistics",
+                            "__sample__": True,
+                        },
+                    }
+                    existing_file = supabase.table("data_files").select("id") \
+                        .eq("user_id", uid).eq("file_name", filename).execute()
+                    if existing_file.data:
+                        supabase.table("data_files").update(record) \
+                            .eq("id", existing_file.data[0]["id"]).execute()
+                    else:
+                        supabase.table("data_files").insert(record).execute()
+                except Exception as meta_err:
+                    logger.warning("Could not write data_files record for %s: %s", filename, meta_err)
+
         except Exception as e:
             results.append({"file": filename, "success": False, "error": str(e)})
 

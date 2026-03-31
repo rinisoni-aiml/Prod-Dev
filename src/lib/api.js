@@ -44,6 +44,8 @@ export const dataApi = {
   upload: (formData) => api.post('/api/fmcg/data/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   getSources: () => api.get('/api/fmcg/data/sources'),
   deleteSource: (id) => api.delete(`/api/fmcg/data/sources/${id}`),
+  // Register bundled sample CSVs for the current user (idempotent)
+  loadSampleData: () => api.post('/api/fmcg/data/load-sample'),
 };
 
 // ── Logistics: Data ───────────────────────────────────────────────────────────
@@ -51,6 +53,8 @@ export const logisticsDataApi = {
   upload: (formData) => api.post('/api/logistics/data/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   getSources: () => api.get('/api/logistics/data/sources'),
   deleteSource: (id) => api.delete(`/api/logistics/data/sources/${id}`),
+  // Register bundled sample logistics dataset for the current user (idempotent)
+  loadSampleData: () => api.post('/api/logistics/v1/upload/sample'),
 };
 
 // ── FMCG: Dashboard ───────────────────────────────────────────────────────────

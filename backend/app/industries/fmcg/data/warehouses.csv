@@ -1,0 +1,17 @@
+WarehouseID,WarehouseName,Region,City,Capacity,CurrentOccupancy,Status
+WH001,Delhi Warehouse,North,Delhi,385243,78369,Active
+WH002,Chandigarh Warehouse,North,Chandigarh,438786,164194,Active
+WH003,Jaipur Warehouse,North,Jaipur,167026,93158,Active
+WH004,Lucknow Warehouse,North,Lucknow,404785,305929,Active
+WH005,Bangalore Warehouse,South,Bangalore,359588,241208,Active
+WH006,Chennai Warehouse,South,Chennai,65622,69123,Active
+WH007,Hyderabad Warehouse,South,Hyderabad,171981,284951,Maintenance
+WH008,Kochi Warehouse,South,Kochi,63912,314254,Active
+WH009,Kolkata Warehouse,East,Kolkata,425400,360726,Maintenance
+WH010,Bhubaneswar Warehouse,East,Bhubaneswar,269949,135574,Active
+WH011,Guwahati Warehouse,East,Guwahati,358944,165852,Active
+WH012,Patna Warehouse,East,Patna,447833,103707,Active
+WH013,Mumbai Warehouse,West,Mumbai,228389,165684,Active
+WH014,Pune Warehouse,West,Pune,162886,196472,Active
+WH015,Ahmedabad Warehouse,West,Ahmedabad,98625,219191,Active
+WH016,Surat Warehouse,West,Surat,238208,200331,Maintenance

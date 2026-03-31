@@ -6,6 +6,7 @@ import Logo from '@/components/Logo';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/lib/supabase';
 import { uploadDataFile } from '@/lib/dataFiles';
+import { dataApi, logisticsDataApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 import SchemaMapping, { DEFAULT_PLATFORM_FIELDS, autoMapHeaders, parseCSVPreview } from '@/components/data/SchemaMapping';
 
@@ -105,13 +106,20 @@ const OnboardingPage = () => {
         .eq('email', user.email)
         .is('company_name', null);
 
-      // Upload processed files to Supabase Storage
       if (uploadMode === 'upload' && uploadedFiles.length > 0) {
+        // Upload user-provided files to Supabase Storage
         await Promise.all(
           uploadedFiles
             .filter(f => f.status === 'ready')
             .map(f => uploadDataFile(user.id, f.file, f.mapping, f.previewRows.length))
         );
+      } else if (uploadMode === 'sample') {
+        // Route to the correct industry's sample-data loader
+        if (industry === 'logistics') {
+          await logisticsDataApi.loadSampleData();
+        } else {
+          await dataApi.loadSampleData();
+        }
       }
 
       setProfile(profileData);
@@ -331,11 +339,18 @@ const OnboardingPage = () => {
 
               {processing && (
                 <div className="mt-4 space-y-2">
-                  {[
-                    { icon: <CloudUpload className="h-4 w-4" />, text: 'Saving your profile...' },
-                    { icon: <Upload className="h-4 w-4" />, text: 'Uploading files...' },
-                    { icon: <CheckCircle className="h-4 w-4 text-success" />, text: 'Workspace ready!' },
-                  ].map(({ icon, text }, i) => (
+                  {(uploadMode === 'sample'
+                    ? [
+                        { icon: <CloudUpload className="h-4 w-4" />, text: 'Saving your profile...' },
+                        { icon: <Upload className="h-4 w-4" />, text: 'Loading sample dataset...' },
+                        { icon: <CheckCircle className="h-4 w-4 text-success" />, text: 'Workspace ready! Running analysis...' },
+                      ]
+                    : [
+                        { icon: <CloudUpload className="h-4 w-4" />, text: 'Saving your profile...' },
+                        { icon: <Upload className="h-4 w-4" />, text: 'Uploading files...' },
+                        { icon: <CheckCircle className="h-4 w-4 text-success" />, text: 'Workspace ready!' },
+                      ]
+                  ).map(({ icon, text }, i) => (
                     <motion.div key={text} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.5 }}
                       className="flex items-center gap-2 text-sm text-foreground-secondary">
                       {icon}{text}
