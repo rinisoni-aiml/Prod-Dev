@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Upload, AlertCircle, Factory, GraduationCap, Activity, Building2, Truck, CreditCard, Lock } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Upload, AlertCircle, Factory, GraduationCap, Activity, Building2, Truck, CreditCard, Lock, Plug, Mail, CheckCircle, CloudUpload } from 'lucide-react';
 import Logo from '@/components/Logo';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/lib/supabase';
@@ -218,21 +218,78 @@ const OnboardingPage = () => {
           {step === 3 && (
             <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
               className="glass-card p-8 rounded-2xl">
-              <h2 className="text-2xl font-bold text-foreground mb-2">Upload your data</h2>
-              <p className="text-foreground-secondary mb-6">We support CSV and Excel files. Multiple files supported.</p>
+              <h2 className="text-2xl font-bold text-foreground mb-2">Connect your data</h2>
+              <p className="text-foreground-secondary mb-6">Choose how you'd like to bring your data into PulseIQ.</p>
 
-              <div className="flex gap-2 mb-6">
-                <button onClick={() => setUploadMode('upload')}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${uploadMode === 'upload' ? 'gradient-brand text-primary-foreground' : 'bg-muted text-foreground-secondary'}`}>
-                  Upload Data
-                </button>
-                <button onClick={() => setUploadMode('sample')}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${uploadMode === 'sample' ? 'gradient-brand text-primary-foreground' : 'bg-muted text-foreground-secondary'}`}>
-                  Use Sample Data
-                </button>
+              {/* Data source cards */}
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                {[
+                  {
+                    key: 'upload',
+                    icon: CloudUpload,
+                    label: 'Upload Files',
+                    desc: 'CSV or Excel files from your computer',
+                    live: true,
+                  },
+                  {
+                    key: 'sample',
+                    icon: AlertCircle,
+                    label: 'Use Sample Data',
+                    desc: 'Explore with a pre-loaded demo dataset',
+                    live: true,
+                  },
+                  {
+                    key: 'erp',
+                    icon: Plug,
+                    label: 'Connect ERP / CRM',
+                    desc: 'Sync directly from SAP, Salesforce, HubSpot & more via API',
+                    live: false,
+                  },
+                  {
+                    key: 'gmail',
+                    icon: Mail,
+                    label: 'Connect Gmail',
+                    desc: 'Pull insights from emails, threads, and attachments automatically',
+                    live: false,
+                  },
+                ].map(({ key, icon: Icon, label, desc, live }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => live && setUploadMode(key)}
+                    disabled={!live}
+                    className={`p-4 rounded-xl border text-left transition-all ${
+                      !live
+                        ? 'border-border opacity-50 cursor-not-allowed glass-card'
+                        : uploadMode === key
+                          ? 'border-primary shadow-[var(--shadow-glow-primary)] bg-primary/5'
+                          : 'border-border hover:border-primary/30 glass-card cursor-pointer'
+                    }`}
+                  >
+                    <div className={`h-9 w-9 rounded-lg flex items-center justify-center mb-3 ${live ? 'bg-primary/10' : 'bg-muted'}`}>
+                      <Icon className={`h-5 w-5 ${live ? 'text-primary' : 'text-foreground-secondary'}`} />
+                    </div>
+                    <div className="text-sm font-semibold text-foreground">{label}</div>
+                    <div className="text-xs text-foreground-secondary mt-1 leading-relaxed">{desc}</div>
+                    {live ? (
+                      uploadMode === key && (
+                        <div className="flex items-center gap-1 mt-2">
+                          <CheckCircle className="h-3.5 w-3.5 text-primary" />
+                          <span className="text-xs text-primary font-semibold">Selected</span>
+                        </div>
+                      )
+                    ) : (
+                      <div className="flex items-center gap-1 mt-2">
+                        <Lock className="h-3 w-3 text-foreground-secondary" />
+                        <span className="text-xs text-foreground-secondary font-medium">Coming Soon</span>
+                      </div>
+                    )}
+                  </button>
+                ))}
               </div>
 
-              {uploadMode === 'upload' ? (
+              {/* Active mode panel */}
+              {uploadMode === 'upload' && (
                 <div className="space-y-4">
                   <div
                     onDragOver={(e) => e.preventDefault()}
@@ -251,7 +308,6 @@ const OnboardingPage = () => {
                     <p className="text-sm text-foreground-secondary">Drag & drop CSV or Excel files here</p>
                     <p className="text-xs text-foreground-secondary mt-1">or click to browse · Multiple files supported</p>
                   </div>
-
                   {uploadedFiles.length > 0 && (
                     <SchemaMapping
                       files={uploadedFiles}
@@ -263,7 +319,9 @@ const OnboardingPage = () => {
                     />
                   )}
                 </div>
-              ) : (
+              )}
+
+              {uploadMode === 'sample' && (
                 <div className="glass-card p-6 rounded-xl text-center border border-primary/20">
                   <AlertCircle className="h-8 w-8 text-primary mx-auto mb-3" />
                   <p className="text-sm text-foreground mb-2">We'll load a curated {industry.toUpperCase()} sample dataset</p>
@@ -273,9 +331,15 @@ const OnboardingPage = () => {
 
               {processing && (
                 <div className="mt-4 space-y-2">
-                  {['📊 Saving your profile...', '☁️ Uploading files...', '✅ Workspace ready!'].map((msg, i) => (
-                    <motion.p key={msg} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.5 }}
-                      className="text-sm text-foreground-secondary">{msg}</motion.p>
+                  {[
+                    { icon: <CloudUpload className="h-4 w-4" />, text: 'Saving your profile...' },
+                    { icon: <Upload className="h-4 w-4" />, text: 'Uploading files...' },
+                    { icon: <CheckCircle className="h-4 w-4 text-success" />, text: 'Workspace ready!' },
+                  ].map(({ icon, text }, i) => (
+                    <motion.div key={text} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.5 }}
+                      className="flex items-center gap-2 text-sm text-foreground-secondary">
+                      {icon}{text}
+                    </motion.div>
                   ))}
                 </div>
               )}

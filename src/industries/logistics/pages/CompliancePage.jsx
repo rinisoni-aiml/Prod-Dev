@@ -139,7 +139,7 @@ export default function CompliancePage() {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">🚛 Assets &amp; Drivers Compliance</h1>
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><Truck className="h-6 w-6 text-primary" /> Assets &amp; Drivers Compliance</h1>
         <p className="text-sm text-foreground-secondary mt-1">Track license, insurance, and fitness expiry dates</p>
       </div>
 
