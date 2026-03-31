@@ -10,9 +10,16 @@ from app.services.fmcg.forecast_service import (
     generate_forecast,
 )
 from datetime import datetime
+from pathlib import Path
+import io
 import pandas as pd
 
 router = APIRouter()
+
+# Path to bundled sample CSVs on the server filesystem
+_FMCG_SAMPLE_DIR = Path(__file__).resolve().parent.parent.parent / "industries" / "fmcg" / "data"
+_LOCAL_SAMPLE_PREFIX = "_local_sample/fmcg/"
+_SALES_NROWS = 5000
 
 
 # ─── DB persistence helpers ──────────────────────────────────────────────────
@@ -103,7 +110,21 @@ def _download_and_parse(file_id: str, uid: str) -> pd.DataFrame:
     if not storage_path:
         raise HTTPException(status_code=400, detail="File has no storage path recorded")
 
-    file_bytes = supabase.storage.from_("data-files").download(storage_path)
+    # Sample files live on disk — read directly instead of downloading from Storage
+    if storage_path.startswith(_LOCAL_SAMPLE_PREFIX):
+        local_filename = storage_path[len(_LOCAL_SAMPLE_PREFIX):]
+        local_path = _FMCG_SAMPLE_DIR / local_filename
+        if not local_path.exists():
+            raise HTTPException(status_code=404, detail=f"Sample file not found on server: {local_filename}")
+        file_bytes = local_path.read_bytes()
+        # Apply row limit for large sales orders file
+        if local_filename == "sales_orders_complete.csv":
+            df_trim = pd.read_csv(io.BytesIO(file_bytes), nrows=_SALES_NROWS)
+            file_bytes = df_trim.to_csv(index=False).encode()
+        filename = local_filename
+    else:
+        file_bytes = supabase.storage.from_("data-files").download(storage_path)
+
     return parse_file_to_dataframe(file_bytes, filename, column_mapping)
 
 

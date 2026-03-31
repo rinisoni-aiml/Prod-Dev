@@ -58,7 +58,7 @@ _SAMPLE_FILES = [
     },
 ]
 
-# Sales orders column mapping (shortcut — avoids searching _SAMPLE_FILES at runtime)
+# Sales orders column mapping used for inline ML analysis
 _SALES_CM = {
     "date": "OrderDate",
     "units_sold": "Quantity",
@@ -67,8 +67,12 @@ _SALES_CM = {
     "region": "Region",
 }
 
-# Max rows to keep from the large sales orders file for fast processing
+# Rows to keep from the large sales orders file
 _SALES_NROWS = 5000
+
+# Prefix used in storage_path for sample files that live on disk, not in Supabase Storage.
+# The forecasting endpoint recognises this prefix and reads from the local filesystem.
+_LOCAL_SAMPLE_PREFIX = "_local_sample/fmcg/"
 
 
 @router.get("/sources")
@@ -85,10 +89,12 @@ async def get_data_sources(current_user=Depends(get_current_user)):
 async def delete_data_source(file_id: str, current_user=Depends(get_current_user)):
     uid = str(current_user.id)
     try:
-        # Get file record first to delete from storage
         resp = supabase.table("data_files").select("storage_path").eq("id", file_id).eq("user_id", uid).single().execute()
-        if resp.data and resp.data.get("storage_path"):
-            supabase.storage.from_("data-files").remove([resp.data["storage_path"]])
+        if resp.data:
+            sp = resp.data.get("storage_path") or ""
+            # Only try to remove from Storage if it's a real storage path (not a local sample marker)
+            if sp and not sp.startswith("_local_sample/"):
+                supabase.storage.from_("data-files").remove([sp])
         supabase.table("data_files").delete().eq("id", file_id).eq("user_id", uid).execute()
         return {"message": "File deleted"}
     except Exception as e:
@@ -98,13 +104,14 @@ async def delete_data_source(file_id: str, current_user=Depends(get_current_user
 @router.post("/load-sample")
 async def load_sample_data(current_user=Depends(get_current_user)):
     """
-    Register the bundled FMCG sample CSVs for the current user AND immediately
-    run forecast + inventory optimisation so the dashboard is fully populated
-    without needing an auto-analyse pass.
+    Register the bundled FMCG sample CSVs for the current user AND run
+    forecast + inventory optimisation so the dashboard is fully populated.
 
-    - sales_orders_complete.csv is trimmed to _SALES_NROWS rows before upload
-      so Storage upload and XGBoost both finish quickly.
-    - Idempotent: if sample records already exist they are returned immediately.
+    No Supabase Storage uploads — files stay on disk and are read directly.
+    The storage_path field uses a '_local_sample/fmcg/' prefix so the
+    forecasting endpoint knows to read from the local filesystem.
+
+    Idempotent: if sample records already exist they are returned immediately.
     """
     uid = str(current_user.id)
 
@@ -117,7 +124,7 @@ async def load_sample_data(current_user=Depends(get_current_user)):
     except Exception:
         pass
 
-    # ── Upload files ─────────────────────────────────────────────────────────
+    # ── Register files (no Storage upload — files live on disk) ──────────────
     created = []
     trimmed_sales_bytes: bytes | None = None
 
@@ -128,38 +135,30 @@ async def load_sample_data(current_user=Depends(get_current_user)):
         try:
             raw_bytes = filepath.read_bytes()
 
-            # Trim the large sales orders file so upload and ML are fast
             if sf["filename"] == "sales_orders_complete.csv":
                 df_trim = pd.read_csv(io.BytesIO(raw_bytes), nrows=_SALES_NROWS)
-                content = df_trim.to_csv(index=False).encode()
-                trimmed_sales_bytes = content
+                trimmed_sales_bytes = df_trim.to_csv(index=False).encode()
+                file_size = len(trimmed_sales_bytes)
             else:
-                content = raw_bytes
-
-            storage_path = f"{uid}/sample/{sf['filename']}"
-            try:
-                supabase.storage.from_("data-files").upload(
-                    storage_path, content, {"content-type": "text/csv"}
-                )
-            except Exception:
-                pass  # already uploaded on a previous partial run
+                file_size = len(raw_bytes)
 
             record = {
                 "user_id": uid,
                 "file_name": sf["filename"],
-                "storage_path": storage_path,
-                "file_size": len(content),
+                # Marker path — not a real Supabase Storage path
+                "storage_path": f"{_LOCAL_SAMPLE_PREFIX}{sf['filename']}",
+                "file_size": file_size,
                 "column_mapping": sf["column_mapping"],
             }
             resp = supabase.table("data_files").insert(record).execute()
             if resp.data:
                 created.append(resp.data[0])
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to load {sf['filename']}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to register {sf['filename']}: {e}")
 
-    # ── Run analysis inline so dashboard is ready immediately ─────────────────
-    # Pre-populating demand_history + inventory_items means the dashboard will
-    # find has_demand_data=True and skip its auto-analyze pass entirely.
+    # ── Run analysis inline (reads from memory — no network calls) ────────────
+    # Pre-populates demand_history + inventory_items so the dashboard loads
+    # instantly without triggering auto-analyze.
     if trimmed_sales_bytes is not None:
         try:
             from app.services.fmcg.forecast_service import (
@@ -171,12 +170,10 @@ async def load_sample_data(current_user=Depends(get_current_user)):
             from app.routers.fmcg.forecasting import _persist_demand_history
             from app.routers.fmcg.inventory import _persist_inventory_items
 
-            # Forecast
             df = parse_file_to_dataframe(trimmed_sales_bytes, "sales_orders_complete.csv", _SALES_CM)
             run_result = run_all_skus_forecast(df, 30)
             _persist_demand_history(uid, run_result.get("results", {}))
 
-            # Inventory optimisation
             df_inv = parse_file_for_optimization(trimmed_sales_bytes, "sales_orders_complete.csv", _SALES_CM)
             inv_result = run_inventory_optimization(
                 df=df_inv, lead_time_days=7, service_level=0.95,
@@ -185,7 +182,6 @@ async def load_sample_data(current_user=Depends(get_current_user)):
             _persist_inventory_items(uid, inv_result.get("by_sku", []), inv_result.get("by_warehouse", []))
 
         except Exception as e:
-            # Non-fatal: dashboard will fall back to auto-analyze on first load
             logger.warning("Inline sample analysis failed (dashboard will auto-analyze): %s", e)
 
     return created
