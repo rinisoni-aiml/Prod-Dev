@@ -333,7 +333,11 @@ const OnboardingPage = () => {
                 <div className="glass-card p-6 rounded-xl text-center border border-primary/20">
                   <AlertCircle className="h-8 w-8 text-primary mx-auto mb-3" />
                   <p className="text-sm text-foreground mb-2">We'll load a curated {industry.toUpperCase()} sample dataset</p>
-                  <p className="text-xs text-foreground-secondary">247 SKUs · 5 warehouses · 30 days of data</p>
+                  <p className="text-xs text-foreground-secondary">
+                    {industry === 'logistics'
+                      ? '500 shipments · 200 vendors · 500 drivers · full risk analytics'
+                      : '120 SKUs · 16 warehouses · 5,000 sales orders'}
+                  </p>
                 </div>
               )}
 
