@@ -131,7 +131,13 @@ async def load_sample_data(current_user=Depends(get_current_user)):
             continue
         try:
             content = filepath.read_bytes()
-            result = process_file(content, filename, uid, supabase)
+            # Limit to 500 rows per file — enough for a rich demo, avoids processing
+            # tens-of-thousands of rows. skip_auto_risk because shipment_risk_snapshots.xlsx
+            # is loaded separately and would overwrite auto-computed snapshots anyway.
+            result = process_file(
+                content, filename, uid, supabase,
+                max_rows=500, skip_auto_risk=True,
+            )
             rows_inserted = result.get("rows_inserted", 0)
             table_name = result.get("table")
             results.append({
