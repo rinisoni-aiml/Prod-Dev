@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LayoutDashboard, Package, AlertTriangle, FileText, Building2, Activity, Sparkles } from 'lucide-react';
 import { getDashboardView } from "../api/logisticsApi";
 import { formatNumber, formatPercent } from "../utils/logistics";
 
@@ -54,7 +55,7 @@ export default function DashboardPage() {
       <div className="p-6">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
-            📊 Dashboard
+            <LayoutDashboard className="h-7 w-7 text-primary" /> Dashboard
           </h1>
           <p className="text-muted-foreground mt-1">
             Overview of shipments, risk trends, and insights
@@ -74,7 +75,7 @@ export default function DashboardPage() {
       <div className="p-6">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
-            📊 Dashboard
+            <LayoutDashboard className="h-7 w-7 text-primary" /> Dashboard
           </h1>
           <p className="text-muted-foreground mt-1">
             Overview of shipments, risk trends, and insights
@@ -100,7 +101,7 @@ export default function DashboardPage() {
     <div className="p-6">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
-          📊 Dashboard
+          <LayoutDashboard className="h-7 w-7 text-primary" /> Dashboard
         </h1>
         <p className="text-muted-foreground mt-1">
           Overview of shipments, risk trends, and insights
@@ -109,27 +110,27 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-5 gap-4 mb-4">
         <div className="bg-card border border-border rounded-lg p-4">
-          <div className="text-sm text-muted-foreground mb-2">📦 Active Shipments</div>
+          <div className="text-sm text-muted-foreground mb-2 flex items-center gap-1.5"><Package className="h-4 w-4" /> Active Shipments</div>
           <div className="text-2xl font-bold text-foreground">{formatNumber(kpis.active_shipments)}</div>
           <div className="text-xs text-muted-foreground mt-1">Total shipments currently moving</div>
         </div>
         <div className="bg-card border border-border rounded-lg p-4">
-          <div className="text-sm text-muted-foreground mb-2">⚠️ Average Risk</div>
+          <div className="text-sm text-muted-foreground mb-2 flex items-center gap-1.5"><AlertTriangle className="h-4 w-4 text-destructive" /> Average Risk</div>
           <div className="text-2xl font-bold text-destructive">{formatPercent(kpis.high_risk_shipments, 1)}</div>
           <div className="text-xs text-muted-foreground mt-1">Average risk score</div>
         </div>
         <div className="bg-card border border-border rounded-lg p-4">
-          <div className="text-sm text-muted-foreground mb-2">📋 Compliance Alerts</div>
+          <div className="text-sm text-muted-foreground mb-2 flex items-center gap-1.5"><FileText className="h-4 w-4" /> Compliance Alerts</div>
           <div className="text-2xl font-bold text-yellow-500">{formatPercent(kpis.compliance_alerts, 1)}</div>
           <div className="text-xs text-muted-foreground mt-1">Average compliance risk</div>
         </div>
         <div className="bg-card border border-border rounded-lg p-4">
-          <div className="text-sm text-muted-foreground mb-2">🏢 Vendor Risk</div>
+          <div className="text-sm text-muted-foreground mb-2 flex items-center gap-1.5"><Building2 className="h-4 w-4" /> Vendor Risk</div>
           <div className="text-2xl font-bold text-orange-500">{formatPercent(kpis.vendor_risk_alerts, 1)}</div>
           <div className="text-xs text-muted-foreground mt-1">Average vendor risk</div>
         </div>
         <div className="bg-card border border-border rounded-lg p-4">
-          <div className="text-sm text-muted-foreground mb-2">⚡ Company Risk Index</div>
+          <div className="text-sm text-muted-foreground mb-2 flex items-center gap-1.5"><Activity className="h-4 w-4" /> Company Risk Index</div>
           <div className="flex items-center gap-3">
             <div>
               <div className="text-xs text-muted-foreground">Status</div>
@@ -187,13 +188,13 @@ export default function DashboardPage() {
 
         <div className="bg-card border border-border rounded-lg p-6">
           <div className="mb-4">
-            <h2 className="text-lg font-semibold text-foreground">🤖 AI Insights</h2>
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /> AI Insights</h2>
             <p className="text-sm text-muted-foreground">Live business insights</p>
           </div>
           <div className="space-y-4">
             {insights.map((insight, index) => (
               <div key={`${insight.title}-${index}`} className="flex gap-3">
-                <div className="text-2xl">{insight.icon || "🤖"}</div>
+                <Sparkles className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold text-foreground">{insight.title}</div>
                   <div className="text-xs text-muted-foreground mt-1">{insight.body}</div>

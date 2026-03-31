@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Building2, Clock, AlertTriangle, DollarSign, Shield, Bot, Package } from 'lucide-react';
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
@@ -119,7 +120,7 @@ export default function VendorIntelPage() {
     return (
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">🏢 Vendor Intelligence</h1>
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><Building2 className="h-6 w-6 text-primary" /> Vendor Intelligence</h1>
           <p className="text-sm text-foreground-secondary mt-1">Vendor performance metrics and on-time delivery trends</p>
         </div>
         <div className="glass-card rounded-xl p-8 text-center border border-border">
@@ -134,7 +135,7 @@ export default function VendorIntelPage() {
     return (
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">🏢 Vendor Intelligence</h1>
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><Building2 className="h-6 w-6 text-primary" /> Vendor Intelligence</h1>
         </div>
         <div className="glass-card rounded-xl p-8 text-center border border-border">
           <p className="text-foreground-secondary text-sm">{error?.message || 'No vendors available. Upload vendor data to get started.'}</p>
@@ -185,10 +186,10 @@ export default function VendorIntelPage() {
 
       {/* KPIs */}
       <div className={`grid grid-cols-2 lg:grid-cols-4 gap-4 transition-opacity ${selectedLoading ? 'opacity-50' : ''}`}>
-        <KPICard label="On-Time Delivery" value={formatPercent(onTime)} icon="⏱️" color="blue" />
-        <KPICard label="Average Risk" value={avgRisk.toFixed(1)} icon="⚠️" color="red" />
-        <KPICard label="Financial Exposure" value={formatCompactCurrency(exposedValue)} icon="💰" color="orange" />
-        <KPICard label="Risk Category" value={getRiskLevel(avgRisk)} icon="🏢" color="purple" />
+        <KPICard label="On-Time Delivery" value={formatPercent(onTime)} icon={<Clock className="h-4 w-4" />} color="blue" />
+        <KPICard label="Average Risk" value={avgRisk.toFixed(1)} icon={<AlertTriangle className="h-4 w-4" />} color="red" />
+        <KPICard label="Financial Exposure" value={formatCompactCurrency(exposedValue)} icon={<DollarSign className="h-4 w-4" />} color="orange" />
+        <KPICard label="Risk Category" value={getRiskLevel(avgRisk)} icon={<Shield className="h-4 w-4" />} color="purple" />
       </div>
 
       {/* Charts row */}
@@ -249,12 +250,12 @@ export default function VendorIntelPage() {
         {/* AI risk analysis */}
         <div className="glass-card rounded-xl border border-border overflow-hidden">
           <div className="px-5 py-4 border-b border-border">
-            <h2 className="font-semibold text-foreground">🤖 AI Risk Analysis</h2>
+            <h2 className="font-semibold text-foreground flex items-center gap-2"><Bot className="h-4 w-4 text-primary" /> AI Risk Analysis</h2>
           </div>
           <div className="p-5">
             <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-base">🤖</span>
+                <Bot className="h-4 w-4 text-primary" />
                 <span className="text-xs font-semibold text-primary">Vendor Summary</span>
               </div>
               <p className="text-sm text-foreground-secondary leading-relaxed">{selected.insight_text || 'No AI analysis available.'}</p>
@@ -279,7 +280,7 @@ export default function VendorIntelPage() {
                   <div key={shipment.shipment_id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border border-border">
                     <div className="h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0 text-base"
                       style={{ background: `${getRiskColor(shipment.overall_risk_score)}22` }}>
-                      📦
+                      <Package className="h-4 w-4 text-foreground-secondary" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-foreground truncate">

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Package, Pin, BarChart2, Compass, Bot, Phone, Navigation } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import Badge from "@/industries/logistics/components/Badge";
 import PageHeader from "@/industries/logistics/components/PageHeader";
@@ -136,12 +137,12 @@ export default function ShipmentRisk() {
     {
       title: "Primary Exposure Driver",
       description: `${highestComponent[0]} contributes ${highestComponent[1].toFixed(1)} points to the total ${overallRisk.toFixed(1)} risk score (${riskCategoryText}). This is currently the dominant risk lever for this shipment.`,
-      icon: "📌", bg: "bg-red-500/10 border-red-500/20",
+      icon: <Pin className="h-4 w-4 text-red-400" />, bg: "bg-red-500/10 border-red-500/20",
     },
     {
       title: "Secondary Risk Pressure",
       description: `${secondComponent[0]} is the second-highest contributor at ${secondComponent[1].toFixed(1)} points. Coordinated action on the top two components will reduce score faster than isolated interventions.`,
-      icon: "📊", bg: "bg-orange-500/10 border-orange-500/20",
+      icon: <BarChart2 className="h-4 w-4 text-orange-400" />, bg: "bg-orange-500/10 border-orange-500/20",
     },
     {
       title: "Service-Level Outlook",
@@ -150,7 +151,7 @@ export default function ShipmentRisk() {
         : etaDays >= 0
           ? `Delivery deadline is in ${etaDays} day(s). Keep carrier and route controls active to protect on-time commitment.`
           : `Delivery deadline is overdue by ${Math.abs(etaDays)} day(s). Escalation protocol should stay active until milestone recovery is confirmed.`,
-      icon: "🧭", bg: "bg-blue-500/10 border-blue-500/20",
+      icon: <Compass className="h-4 w-4 text-blue-400" />, bg: "bg-blue-500/10 border-blue-500/20",
     },
   ];
 
@@ -173,7 +174,7 @@ export default function ShipmentRisk() {
 
   return (
     <div className="p-6 space-y-5">
-      <PageHeader title="Shipment Risk" subtitle="Detailed risk breakdown for individual shipments" icon="📦" />
+      <PageHeader title="Shipment Risk" subtitle="Detailed risk breakdown for individual shipments" icon={<Package className="h-5 w-5 text-foreground-secondary" />} />
 
       {loading ? (
         <div className="glass-card rounded-xl p-8 text-center text-foreground-secondary text-sm">Loading shipment risk profile...</div>
@@ -268,7 +269,7 @@ export default function ShipmentRisk() {
               <div className="space-y-3">
                 {factors.map((factor) => (
                   <div key={factor.title} className={`flex gap-3 rounded-xl border p-4 ${factor.bg}`}>
-                    <span className="text-xl flex-shrink-0 mt-0.5">{factor.icon}</span>
+                    <span className="flex-shrink-0 mt-0.5">{factor.icon}</span>
                     <div>
                       <div className="text-xs font-semibold text-foreground mb-1">{factor.title}</div>
                       <div className="text-xs text-foreground-secondary leading-relaxed">{factor.description}</div>
@@ -279,7 +280,7 @@ export default function ShipmentRisk() {
             </div>
 
             <div className="glass-card rounded-xl border border-border p-5">
-              <div className="text-sm font-semibold text-foreground mb-4">🤖 AI Recommended Mitigation</div>
+              <div className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2"><Bot className="h-4 w-4 text-primary" /> AI Recommended Mitigation</div>
               <div className="space-y-4">
                 <p className="text-xs text-foreground-secondary leading-relaxed">
                   {selected?.recommendation || "Execute reroute and backup carrier strategy to reduce operational volatility while protecting delivery SLA."}
@@ -287,10 +288,10 @@ export default function ShipmentRisk() {
 
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { label: "Proposed Route",       value: `🛣️ ${routeName}` },
-                    { label: "Est. Delay Avoidance", value: "✅ Saves 24–48h", cls: "text-green-400" },
-                    { label: "Alternative Carrier",  value: `🚚 ${currentCarrier}` },
-                    { label: "Financial Impact",     value: "↑ +₹4,200 (Freight)", cls: "text-yellow-400" },
+                    { label: "Proposed Route",       value: routeName },
+                    { label: "Est. Delay Avoidance", value: "Saves 24–48h", cls: "text-green-400" },
+                    { label: "Alternative Carrier",  value: currentCarrier },
+                    { label: "Financial Impact",     value: "+₹4,200 (Freight)", cls: "text-yellow-400" },
                   ].map((item) => (
                     <div key={item.label} className="bg-muted/60 rounded-lg p-3">
                       <div className="text-[10px] uppercase tracking-widest text-foreground-secondary font-bold mb-1">{item.label}</div>
@@ -310,11 +311,11 @@ export default function ShipmentRisk() {
                 </div>
 
                 <div className="flex gap-2 pt-1">
-                  <button type="button" className="flex-1 px-4 py-2 rounded-lg text-xs font-medium border border-border text-foreground-secondary hover:bg-muted transition-colors">
-                    📞 Contact Carrier
+                  <button type="button" className="flex-1 px-4 py-2 rounded-lg text-xs font-medium border border-border text-foreground-secondary hover:bg-muted transition-colors flex items-center justify-center gap-1.5">
+                    <Phone className="h-3.5 w-3.5" /> Contact Carrier
                   </button>
-                  <button type="button" className="flex-1 px-4 py-2 rounded-lg text-xs font-medium gradient-brand text-white hover:opacity-90 transition-opacity">
-                    🚀 Execute Reroute Plan
+                  <button type="button" className="flex-1 px-4 py-2 rounded-lg text-xs font-medium gradient-brand text-white hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5">
+                    <Navigation className="h-3.5 w-3.5" /> Execute Reroute Plan
                   </button>
                 </div>
               </div>

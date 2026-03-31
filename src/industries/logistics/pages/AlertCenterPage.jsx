@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Bot, CheckCircle } from 'lucide-react';
 import Badge from "@/industries/logistics/components/Badge";
 import PageHeader from "@/industries/logistics/components/PageHeader";
 import {
@@ -108,7 +109,7 @@ export default function AlertCenter() {
 
   return (
     <div className="p-6 space-y-5">
-      <PageHeader title="Alert Center" subtitle="Critical and high-priority risk alerts across shipments" icon="🚨" />
+      <PageHeader title="Alert Center" subtitle="Critical and high-priority risk alerts across shipments" icon={<AlertTriangle className="h-5 w-5 text-destructive" />} />
 
       {state.loading ? (
         <div className="glass-card rounded-xl p-8 text-center text-foreground-secondary text-sm">Loading active alerts...</div>
@@ -182,7 +183,7 @@ export default function AlertCenter() {
                     </div>
 
                     <div className="bg-muted/60 rounded-lg p-3 space-y-1">
-                      <div className="text-[10px] font-bold uppercase tracking-widest text-foreground-secondary">🤖 Why this alert was generated</div>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-foreground-secondary flex items-center gap-1"><Bot className="h-3 w-3" /> Why this alert was generated</div>
                       <p className="text-xs text-foreground leading-relaxed">{alert.reason}</p>
                     </div>
 
@@ -211,7 +212,7 @@ export default function AlertCenter() {
             </div>
           ) : (
             <div className="glass-card rounded-xl p-12 text-center border border-border">
-              <div className="text-3xl mb-3">✅</div>
+              <CheckCircle className="h-10 w-10 text-green-400 mx-auto mb-3" />
               <div className="text-sm text-foreground-secondary">No alerts match the current filters.</div>
             </div>
           )}

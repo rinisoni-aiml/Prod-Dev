@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Truck, XCircle, AlertTriangle, User } from 'lucide-react';
 import { logisticsApi } from '@/industries/logistics/api/logisticsApi';
 import { formatDate, getExpiryState } from '@/industries/logistics/utils/logistics';
 
@@ -110,7 +111,7 @@ export default function CompliancePage() {
     return (
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">🚛 Assets &amp; Drivers Compliance</h1>
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><Truck className="h-6 w-6 text-primary" /> Assets &amp; Drivers Compliance</h1>
           <p className="text-sm text-foreground-secondary mt-1">Track license, insurance, and fitness expiry dates</p>
         </div>
         <div className="glass-card rounded-xl p-8 text-center border border-border">
@@ -125,7 +126,7 @@ export default function CompliancePage() {
     return (
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">🚛 Assets &amp; Drivers Compliance</h1>
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><Truck className="h-6 w-6 text-primary" /> Assets &amp; Drivers Compliance</h1>
         </div>
         <div className="glass-card rounded-xl p-8 text-center border border-destructive/30">
           <p className="text-destructive text-sm">{error?.message || 'Failed to load compliance data.'}</p>
@@ -144,10 +145,10 @@ export default function CompliancePage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard label="Critical Expiries" value={kpis.critical_expiries ?? 0} icon="⛔" color="red" />
-        <KPICard label="High Risk Assets" value={kpis.high_risk_assets ?? 0} icon="⚠️" color="orange" />
-        <KPICard label="Fleet Tracked" value={kpis.fleet_tracked ?? 0} icon="🚚" color="blue" />
-        <KPICard label="Drivers Tracked" value={kpis.drivers_tracked ?? 0} icon="👤" color="green" />
+        <KPICard label="Critical Expiries" value={kpis.critical_expiries ?? 0} icon={<XCircle className="h-4 w-4" />} color="red" />
+        <KPICard label="High Risk Assets" value={kpis.high_risk_assets ?? 0} icon={<AlertTriangle className="h-4 w-4" />} color="orange" />
+        <KPICard label="Fleet Tracked" value={kpis.fleet_tracked ?? 0} icon={<Truck className="h-4 w-4" />} color="blue" />
+        <KPICard label="Drivers Tracked" value={kpis.drivers_tracked ?? 0} icon={<User className="h-4 w-4" />} color="green" />
       </div>
 
       {/* Compliance Register */}

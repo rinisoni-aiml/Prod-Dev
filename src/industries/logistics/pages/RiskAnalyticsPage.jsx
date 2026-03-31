@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { TrendingUp } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
@@ -38,7 +39,7 @@ export default function RiskAnalyticsPage() {
     return (
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">📈 Risk Analytics</h1>
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><TrendingUp className="h-6 w-6 text-primary" /> Risk Analytics</h1>
           <p className="text-sm text-foreground-secondary mt-1">Route risk distribution, vendor comparison, and trends</p>
         </div>
         <div className="glass-card rounded-xl p-8 text-center border border-border">
@@ -53,7 +54,7 @@ export default function RiskAnalyticsPage() {
     return (
       <div className="p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">📈 Risk Analytics</h1>
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><TrendingUp className="h-6 w-6 text-primary" /> Risk Analytics</h1>
         </div>
         <div className="glass-card rounded-xl p-8 text-center border border-destructive/30">
           <p className="text-destructive text-sm">{error?.message || 'Failed to load risk analytics.'}</p>

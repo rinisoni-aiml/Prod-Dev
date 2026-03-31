@@ -6,19 +6,26 @@ import { useAuthStore } from '@/stores/authStore';
 import { chatWithGroq } from '@/lib/groq';
 import ReactMarkdown from 'react-markdown';
 
-const suggestedPrompts = [
-  'Which products are at stockout risk?',
-  'Show my top 5 SKUs this month',
-  "What's my inventory health score?",
-  'Which contracts expire soon?',
-  'Forecast demand for next 30 days',
-];
+const SUGGESTED_PROMPTS = {
+  fmcg: [
+    'Which products are at stockout risk?',
+    'Show my top 5 SKUs this month',
+    "What's my inventory health score?",
+    'Which contracts expire soon?',
+    'Forecast demand for next 30 days',
+  ],
+  logistics: [
+    'What is the current network risk level?',
+    'Which routes have the highest delay pressure?',
+    'Summarise financial exposure across active shipments.',
+    'Which vendors have the worst on-time delivery?',
+    'What compliance documents are expiring soon?',
+  ],
+};
 
-const buildSystemPrompt = (profile) => {
-  const industry = profile?.industry || 'FMCG';
-  const company = profile?.company_name || 'the company';
-  const role = profile?.role || 'user';
-  return `You are PulseIQ AI, an intelligent business analytics assistant for ${company}, specializing in ${industry} industry insights.
+const SYSTEM_PROMPTS = {
+  fmcg: (company, role) =>
+    `You are PulseIQ AI, an intelligent business analytics assistant for ${company}, specializing in FMCG industry insights.
 The user's role is: ${role}.
 
 You help with:
@@ -28,7 +35,29 @@ You help with:
 - Data-driven business decisions
 
 Keep responses concise, actionable, and data-focused. Use markdown for structure where helpful.
-If you don't have real data, provide analytical frameworks and ask clarifying questions.`;
+If you don't have real data, provide analytical frameworks and ask clarifying questions.`,
+
+  logistics: (company, role) =>
+    `You are PulseIQ AI, an intelligent operations assistant for ${company}, specializing in logistics and supply chain intelligence.
+The user's role is: ${role}.
+
+You help with:
+- Shipment risk assessment and route analysis
+- Vendor performance and on-time delivery tracking
+- Compliance monitoring (fleet, driver licenses, insurance)
+- Financial exposure and freight cost analysis
+- Network-level risk scoring and mitigation recommendations
+
+Keep responses concise, actionable, and data-focused. Use markdown for structure where helpful.
+If you don't have real data, provide analytical frameworks and ask clarifying questions.`,
+};
+
+const buildSystemPrompt = (profile) => {
+  const industry = String(profile?.industry || 'fmcg').toLowerCase();
+  const company = profile?.company_name || 'the company';
+  const role = profile?.role || 'user';
+  const builder = SYSTEM_PROMPTS[industry] || SYSTEM_PROMPTS.fmcg;
+  return builder(company, role);
 };
 
 const AIChatDrawer = () => {
@@ -140,7 +169,7 @@ const AIChatDrawer = () => {
             {messages.length === 0 && (
               <div className="space-y-3 mt-8">
                 <p className="text-sm text-foreground-secondary text-center mb-4">Try asking:</p>
-                {suggestedPrompts.map((prompt) => (
+                {(SUGGESTED_PROMPTS[String(profile?.industry || 'fmcg').toLowerCase()] || SUGGESTED_PROMPTS.fmcg).map((prompt) => (
                   <button key={prompt} onClick={() => sendMessage(prompt)}
                     className="w-full text-left p-3 rounded-lg border border-border hover:border-primary/30 hover:bg-primary/5 text-sm text-foreground-secondary hover:text-foreground transition-all">
                     {prompt}
