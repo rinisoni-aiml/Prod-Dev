@@ -80,7 +80,9 @@ const ForecastingPage = () => {
     const fileRecord = dataFiles.find((f) => f.id === fileId);
     if (!fileRecord) return;
 
-    if (!fileRecord.column_mapping?.date || !fileRecord.column_mapping?.units_sold) {
+    const hasDateCol = fileRecord.column_mapping?.date && fileRecord.column_mapping.date !== '__skip__';
+    const hasUnitsCol = fileRecord.column_mapping?.units_sold && fileRecord.column_mapping.units_sold !== '__skip__';
+    if (!hasDateCol || !hasUnitsCol) {
       toast.error('This file needs "Date" and "Units Sold" columns mapped. Go to Data Upload to remap.');
       return;
     }
@@ -91,8 +93,15 @@ const ForecastingPage = () => {
     setMetrics(null);
     setModelType(null);
 
+    // Hard 60-second timeout
+    const timeoutId = setTimeout(() => {
+      setRunning(false);
+      toast.error('Forecast timed out after 60 seconds. Try with a smaller file or fewer SKUs.');
+    }, 60000);
+
     try {
       const response = await forecastApi.runForecast(fileId, horizonDays);
+      clearTimeout(timeoutId);
       const { skus, results } = response.data;
 
       setSkuList(skus);
@@ -112,6 +121,7 @@ const ForecastingPage = () => {
       const skuCount = skus.length - 1; // exclude "All Products"
       toast.success(`XGBoost forecast complete — ${skuCount} product(s) analysed`);
     } catch (err) {
+      clearTimeout(timeoutId);
       const detail = err.response?.data?.detail || err.message || 'Forecast failed';
       toast.error(detail);
     } finally {

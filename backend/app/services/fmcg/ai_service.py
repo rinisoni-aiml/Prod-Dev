@@ -1,20 +1,81 @@
+"""
+FMCG AI Service
+
+Handles LLM calls for the chatbot and insight generation.
+Tries providers in order: Groq → OpenAI → Anthropic.
+
+System prompt grounds the LLM strictly in the user's Supabase results data.
+Conversation history (last 6 messages) is passed for follow-up questions.
+"""
+
 import httpx
 from app.config import settings
 
-SYSTEM_PROMPT = (
-    "You are an AI assistant for PulseIQ, a supply chain management platform for FMCG businesses. "
-    "Help users with inventory management, demand forecasting, and supply chain optimisation. "
-    "Be concise, data-driven, and actionable."
-)
+# ─── System prompt ────────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = """You are PulseIQ, an AI supply chain analyst for an FMCG (Fast-Moving Consumer Goods) company.
+
+You answer questions EXCLUSIVELY from the actual data provided in the context block below.
+NEVER invent, estimate, or hallucinate numbers.
+If specific data is not in the context, say: "Data not available for this query."
+
+## Data you have access to (from the user's latest analysis run):
+
+### inventory_items table
+Each row = one SKU's current inventory status.
+Columns: sku, product_name, warehouse_name, current_stock (units on hand),
+         reorder_point (trigger reorder when stock ≤ this),
+         daily_avg_demand (avg units sold per day),
+         days_left (days of stock remaining = current_stock / daily_avg_demand),
+         status: "optimal" | "low_stock" | "stockout" | "overstock"
+
+### demand_history table
+Each row = one day's sales for one SKU.
+Columns: date (YYYY-MM-DD), sku, units (actual sales), forecast (predicted — may be null for historical rows)
+
+### warehouses table
+Each row = warehouse summary.
+Columns: name, location, total_skus, stockouts (count), fill_rate (%), status: "good" | "warning" | "critical"
+
+## Rules for answering:
+1. Always cite the specific numbers from the context (e.g., "Surf Excel 1kg has 342 units, 8.5 days of stock").
+2. For stockout risk questions, look at status = "stockout" or "low_stock" and days_left.
+3. For demand/forecast questions, look at demand_history forecast values.
+4. For warehouse questions, match warehouse_name in inventory_items or name in warehouses.
+5. If the context shows no data for a product/warehouse/region, respond: "No data found for [query term] in the current analysis."
+6. Keep answers concise and data-driven. Use bullet points for lists of SKUs.
+7. Recommend actions only when supported by the data (e.g., "Reorder X — only 2 days of stock remaining").
+"""
 
 
-async def generate_ai_response(message: str, context: dict | None = None) -> str:
-    """Generate AI response — tries Groq first, then OpenAI, then Anthropic."""
+# ─── Main AI response generator ──────────────────────────────────────────────
+
+async def generate_ai_response(
+    message: str,
+    context: dict | None = None,
+    history: list | None = None,
+) -> str:
+    """
+    Generate AI response with conversation history.
+
+    message – current user message
+    context – dict of DB snapshot (from _build_chat_context)
+    history – list of {"role": "user"|"assistant", "content": "..."} (last 6 msgs)
+    """
+    # Build the messages list: history + current user message
+    messages = list(history or [])
+
+    # Inject context into the first user turn or as a separate system injection
     user_content = message
     if context:
-        user_content = f"Context data: {context}\n\nUser question: {message}"
+        user_content = (
+            f"<data_context>\n{_format_context(context)}\n</data_context>\n\n"
+            f"User question: {message}"
+        )
 
-    # ── Groq (LLaMA 3.1 8B — free & fast) ──────────────────────────────────
+    messages.append({"role": "user", "content": user_content})
+
+    # ── Groq (LLaMA 3.3 70B — fast and capable) ─────────────────────────────
     if settings.groq_api_key:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -25,12 +86,13 @@ async def generate_ai_response(message: str, context: dict | None = None) -> str
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": "llama-3.1-8b-instant",
+                        "model": "llama-3.3-70b-versatile",
                         "messages": [
                             {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": user_content},
+                            *messages,
                         ],
-                        "max_tokens": 600,
+                        "max_tokens": 800,
+                        "temperature": 0.2,
                     },
                 )
                 if resp.status_code == 200:
@@ -52,9 +114,10 @@ async def generate_ai_response(message: str, context: dict | None = None) -> str
                         "model": "gpt-4o-mini",
                         "messages": [
                             {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": user_content},
+                            *messages,
                         ],
-                        "max_tokens": 600,
+                        "max_tokens": 800,
+                        "temperature": 0.2,
                     },
                 )
                 if resp.status_code == 200:
@@ -75,9 +138,9 @@ async def generate_ai_response(message: str, context: dict | None = None) -> str
                     },
                     json={
                         "model": "claude-haiku-4-5-20251001",
-                        "max_tokens": 600,
+                        "max_tokens": 800,
                         "system": SYSTEM_PROMPT,
-                        "messages": [{"role": "user", "content": user_content}],
+                        "messages": messages,
                     },
                 )
                 if resp.status_code == 200:
@@ -87,15 +150,60 @@ async def generate_ai_response(message: str, context: dict | None = None) -> str
 
     return (
         "AI services are temporarily unavailable. "
-        "Please check your API keys in the backend .env file."
+        "Please check your API keys (GROQ_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY) in backend/.env"
     )
 
+
+def _format_context(context: dict) -> str:
+    """Format the context dict into compact readable text for the LLM."""
+    lines = []
+
+    if context.get("top_skus_by_sales"):
+        lines.append("TOP SKUs BY TOTAL SALES:")
+        for item in context["top_skus_by_sales"]:
+            lines.append(f"  - {item['sku']}: {item['total_units']} units")
+
+    if context.get("sales_date_range"):
+        dr = context["sales_date_range"]
+        lines.append(f"SALES DATE RANGE: {dr.get('from')} to {dr.get('to')}")
+
+    if context.get("inventory_status_counts"):
+        lines.append(f"INVENTORY STATUS COUNTS: {context['inventory_status_counts']}")
+
+    if context.get("critical_items"):
+        lines.append("CRITICAL / LOW STOCK ITEMS:")
+        for item in context["critical_items"]:
+            days = item.get("days_left")
+            wh = item.get("warehouse") or "—"
+            stock = item.get("current_stock")
+            lines.append(
+                f"  - {item.get('sku')} | warehouse: {wh} | status: {item.get('status')}"
+                + (f" | days left: {days}" if days is not None else "")
+                + (f" | stock: {stock}" if stock is not None else "")
+            )
+
+    if context.get("warehouses"):
+        lines.append("WAREHOUSE SUMMARY:")
+        for wh in context["warehouses"]:
+            lines.append(
+                f"  - {wh.get('name')} | total_skus: {wh.get('total_skus')} "
+                f"| stockouts: {wh.get('stockouts')} | fill_rate: {wh.get('fill_rate')}%"
+            )
+
+    if context.get("recent_demand"):
+        lines.append("RECENT DEMAND (last 7 days, All Products):")
+        for row in context["recent_demand"][-7:]:
+            lines.append(f"  - {row.get('date')}: {row.get('units')} units")
+
+    return "\n".join(lines) if lines else "No data available."
+
+
+# ─── Insight generator ───────────────────────────────────────────────────────
 
 async def generate_insights(user_id: str, supabase) -> list:
     """Generate insights based on real inventory and alert data."""
     insights = []
     try:
-        # Pull low-stock / stockout items
         items_resp = supabase.table("inventory_items") \
             .select("product_name, sku, status, days_left, warehouse_name") \
             .eq("user_id", user_id) \
@@ -126,7 +234,6 @@ async def generate_insights(user_id: str, supabase) -> list:
                     "confidence": 92,
                 })
 
-        # Check for expiring contracts
         contracts_resp = supabase.table("contracts") \
             .select("contract_name, vendor, end_date") \
             .eq("created_by", user_id) \

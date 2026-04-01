@@ -191,14 +191,49 @@ const SKIP_VALUE = '__skip__';
 // ─── Fuzzy auto-mapping ───────────────────────────────────────────────────────
 
 const ALIASES = {
-  date: ['date', 'orderdate', 'saledate', 'transactiondate', 'invoice_date', 'order_date', 'sale_date', 'period', 'month', 'week', 'timestamp', 'created_at', 'recorded_at'],
-  units_sold: ['units', 'quantity', 'qty', 'sold', 'unitssold', 'orderquantity', 'sales_qty', 'demand', 'volume', 'sales_volume', 'qty_sold', 'amount', 'count'],
-  product_name: ['product', 'item', 'name', 'productname', 'itemname', 'description', 'product_desc', 'item_name', 'goods'],
-  sku: ['sku', 'skucode', 'productid', 'itemid', 'code', 'product_code', 'item_code', 'article', 'article_no', 'barcode', 'part_no'],
-  stock_level: ['stock', 'inventory', 'stocklevel', 'currentstock', 'onhand', 'closing_stock', 'balance', 'stock_on_hand', 'available', 'on_hand'],
-  warehouse: ['warehouse', 'location', 'store', 'branch', 'site', 'depot', 'dc', 'centre', 'facility', 'plant'],
-  region: ['region', 'area', 'territory', 'zone', 'market', 'geography', 'state', 'city', 'district'],
-  unit_price: ['price', 'unitprice', 'cost', 'rate', 'amount', 'value', 'mrp', 'selling_price', 'sp', 'revenue'],
+  date: [
+    'date', 'orderdate', 'saledate', 'transactiondate', 'invoice_date', 'order_date',
+    'sale_date', 'period', 'month', 'week', 'timestamp', 'created_at', 'recorded_at',
+    'delivery_date', 'dispatch_date', 'shipped_date', 'posting_date', 'entry_date',
+    'doc_date', 'document_date', 'bill_date', 'billing_date', 'po_date', 'podate',
+  ],
+  units_sold: [
+    'units', 'quantity', 'qty', 'sold', 'unitssold', 'orderquantity', 'sales_qty',
+    'demand', 'volume', 'sales_volume', 'qty_sold', 'count', 'order_qty', 'dispatch_qty',
+    'transfer_qty', 'shipment_qty', 'issued_qty', 'consumed_qty', 'sales_quantity',
+    'order_quantity', 'dispatch_quantity', 'sold_qty', 'actual_qty', 'actual_sales',
+  ],
+  product_name: [
+    'product', 'item', 'name', 'productname', 'itemname', 'description', 'product_desc',
+    'item_name', 'goods', 'material', 'material_description', 'mat_desc', 'article',
+    'article_description', 'item_description', 'product_description', 'commodity',
+    'product_title', 'item_title', 'good_name',
+  ],
+  sku: [
+    'sku', 'skucode', 'productid', 'itemid', 'code', 'product_code', 'item_code',
+    'article', 'article_no', 'barcode', 'part_no', 'material_no', 'material_code',
+    'mat_no', 'mat_code', 'item_no', 'product_no', 'part_number', 'part_code',
+    'ean', 'upc', 'stock_code', 'catalog_no', 'ref_no', 'reference',
+  ],
+  stock_level: [
+    'stock', 'inventory', 'stocklevel', 'currentstock', 'onhand', 'closing_stock',
+    'balance', 'stock_on_hand', 'available', 'on_hand', 'opening_stock', 'qty_on_hand',
+    'stock_balance', 'available_qty', 'physical_stock', 'unrestricted_stock',
+    'net_stock', 'book_stock', 'warehouse_stock', 'ending_stock', 'end_stock',
+  ],
+  warehouse: [
+    'warehouse', 'location', 'store', 'branch', 'site', 'depot', 'dc', 'centre',
+    'facility', 'plant', 'storage_location', 'sloc', 'plant_code', 'distribution_centre',
+    'fulfillment_centre', 'hub', 'node',
+  ],
+  region: [
+    'region', 'area', 'territory', 'zone', 'market', 'geography', 'state', 'city',
+    'district', 'cluster', 'beat', 'route', 'sales_area', 'sales_territory',
+  ],
+  unit_price: [
+    'price', 'unitprice', 'cost', 'rate', 'value', 'mrp', 'selling_price', 'sp',
+    'revenue', 'net_price', 'list_price', 'sale_price', 'unit_cost', 'per_unit_price',
+  ],
 };
 
 function fuzzyMatch(header, fieldKey) {

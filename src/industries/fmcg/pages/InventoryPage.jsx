@@ -412,6 +412,13 @@ function OptimizationTab({ user }) {
     if (!fileId) { toast.error('Select a data file first'); return; }
     setRunning(true);
     setExpandedWarehouses({});
+
+    // Hard 60-second timeout
+    const timeoutId = setTimeout(() => {
+      setRunning(false);
+      toast.error('Optimization timed out after 60 seconds. Try with a smaller file or fewer SKUs.');
+    }, 60000);
+
     try {
       const resp = await inventoryApi.runOptimization({
         file_id: fileId,
@@ -420,6 +427,7 @@ function OptimizationTab({ user }) {
         order_cost: parseFloat(orderCost) || 0,
         holding_cost_pct: parseFloat(holdingCostPct) / 100 || 0,
       });
+      clearTimeout(timeoutId);
       setResult(resp.data);
       setInventoryResults(resp.data);
       // Invalidate dashboard and inventory queries so they reflect new data
@@ -430,6 +438,7 @@ function OptimizationTab({ user }) {
       queryClient.invalidateQueries({ queryKey: ['inventory-reorder'] });
       queryClient.invalidateQueries({ queryKey: ['alerts'] });
     } catch (err) {
+      clearTimeout(timeoutId);
       toast.error(err.response?.data?.detail || 'Optimization failed');
     } finally {
       setRunning(false);
@@ -531,7 +540,7 @@ function OptimizationTab({ user }) {
           {result && !result.has_stock_data && (
             <p className="text-xs text-warning flex items-center gap-1">
               <AlertTriangle className="h-3 w-3" />
-              No stock_level column found — current stock assumed 0 for all SKUs
+              No stock_level column found — Safety Stock and ROP are computed but current stock status is unknown. Upload a file with a stock column for accurate status.
             </p>
           )}
           {result && result.params && (
@@ -615,15 +624,21 @@ function OptimizationTab({ user }) {
                       className="border-b border-border hover:bg-background-elevated/30 transition-colors">
                       <td className="px-4 py-3 font-medium text-foreground max-w-[160px] truncate">{row.sku}</td>
                       <td className="px-4 py-3 text-foreground-secondary">{row.avg_daily_demand}</td>
-                      <td className="px-4 py-3 text-foreground-secondary">{row.current_stock.toLocaleString()}</td>
-                      <td className="px-4 py-3 text-foreground-secondary">{row.safety_stock.toLocaleString()}</td>
-                      <td className="px-4 py-3 font-medium text-foreground">{row.reorder_point.toLocaleString()}</td>
-                      <td className="px-4 py-3 text-foreground-secondary">{row.eoq.toLocaleString()}</td>
-                      <td className="px-4 py-3 text-foreground-secondary">{row.max_stock.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-foreground-secondary">
+                        {row.current_stock != null ? row.current_stock.toLocaleString() : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-foreground-secondary">{row.safety_stock?.toLocaleString() ?? '—'}</td>
+                      <td className="px-4 py-3 font-medium text-foreground">{row.reorder_point?.toLocaleString() ?? '—'}</td>
+                      <td className="px-4 py-3 text-foreground-secondary">{row.eoq?.toLocaleString() ?? '—'}</td>
+                      <td className="px-4 py-3 text-foreground-secondary">{row.max_stock?.toLocaleString() ?? '—'}</td>
                       <td className="px-4 py-3">
-                        <span className={row.days_remaining < 7 ? 'text-destructive font-bold' : row.days_remaining < 14 ? 'text-warning font-medium' : 'text-foreground-secondary'}>
-                          {row.days_remaining >= 999 ? '∞' : `${row.days_remaining}d`}
-                        </span>
+                        {row.days_remaining == null ? (
+                          <span className="text-foreground-secondary">—</span>
+                        ) : (
+                          <span className={row.days_remaining < 7 ? 'text-destructive font-bold' : row.days_remaining < 14 ? 'text-warning font-medium' : 'text-foreground-secondary'}>
+                            {row.days_remaining >= 999 ? '∞' : `${row.days_remaining}d`}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.cls}`}>{st.label}</span>
@@ -728,13 +743,19 @@ function OptimizationTab({ user }) {
                                 <tr key={row.sku} className="border-b border-border hover:bg-background-elevated/30 transition-colors">
                                   <td className="px-4 py-3 font-medium text-foreground max-w-[160px] truncate">{row.sku}</td>
                                   <td className="px-4 py-3 text-foreground-secondary">{row.avg_daily_demand}</td>
-                                  <td className="px-4 py-3 text-foreground-secondary">{row.current_stock.toLocaleString()}</td>
-                                  <td className="px-4 py-3 text-foreground-secondary">{row.safety_stock.toLocaleString()}</td>
-                                  <td className="px-4 py-3 font-medium text-foreground">{row.reorder_point.toLocaleString()}</td>
+                                  <td className="px-4 py-3 text-foreground-secondary">
+                                    {row.current_stock != null ? row.current_stock.toLocaleString() : '—'}
+                                  </td>
+                                  <td className="px-4 py-3 text-foreground-secondary">{row.safety_stock?.toLocaleString() ?? '—'}</td>
+                                  <td className="px-4 py-3 font-medium text-foreground">{row.reorder_point?.toLocaleString() ?? '—'}</td>
                                   <td className="px-4 py-3">
-                                    <span className={row.days_remaining < 7 ? 'text-destructive font-bold' : row.days_remaining < 14 ? 'text-warning font-medium' : 'text-foreground-secondary'}>
-                                      {row.days_remaining >= 999 ? '∞' : `${row.days_remaining}d`}
-                                    </span>
+                                    {row.days_remaining == null ? (
+                                      <span className="text-foreground-secondary">—</span>
+                                    ) : (
+                                      <span className={row.days_remaining < 7 ? 'text-destructive font-bold' : row.days_remaining < 14 ? 'text-warning font-medium' : 'text-foreground-secondary'}>
+                                        {row.days_remaining >= 999 ? '∞' : `${row.days_remaining}d`}
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="px-4 py-3">
                                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.cls}`}>{st.label}</span>

@@ -38,14 +38,16 @@ def _persist_inventory_items(uid: str, by_sku: list, by_warehouse: list = None):
             sku = item.get("sku")
             if not sku:
                 continue
+            current_stock = item.get("current_stock")
+            days_remaining = item.get("days_remaining")
             items.append({
                 "user_id": uid,
                 "sku": sku,
                 "product_name": sku,
-                "current_stock": int(item.get("current_stock") or 0),
+                "current_stock": int(current_stock) if current_stock is not None else None,
                 "reorder_point": int(item.get("reorder_point") or 0),
                 "daily_avg_demand": float(item.get("avg_daily_demand") or 0),
-                "days_left": float(item.get("days_remaining") or 0) if item.get("days_remaining") is not None else None,
+                "days_left": float(days_remaining) if days_remaining is not None else None,
                 "status": STATUS_MAP.get(item.get("status", "ok"), "optimal"),
             })
         if items:
@@ -317,10 +319,10 @@ async def get_reorder_queue(current_user=Depends(get_current_user)):
                 daily_avg = r.get("daily_avg_demand") or 1
                 days_left = round((r.get("current_stock") or 0) / daily_avg, 1)
 
-            if days_left <= 1:
-                urgency = "critical"
+            if days_left <= 0:
+                urgency = "critical"   # already stocked out
             elif days_left <= 3:
-                urgency = "critical"
+                urgency = "critical"   # stockout imminent
             elif days_left <= 7:
                 urgency = "high"
             else:

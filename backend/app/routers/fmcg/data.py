@@ -169,12 +169,55 @@ async def load_sample_data(current_user=Depends(get_current_user)):
             )
             from app.routers.fmcg.forecasting import _persist_demand_history
             from app.routers.fmcg.inventory import _persist_inventory_items
+            import numpy as np
 
             df = parse_file_to_dataframe(trimmed_sales_bytes, "sales_orders_complete.csv", _SALES_CM)
             run_result = run_all_skus_forecast(df, 30)
             _persist_demand_history(uid, run_result.get("results", {}))
 
+            # For inventory optimization: merge stock levels from inventory.csv if available
+            inv_path = _SAMPLE_DATA_DIR / "inventory.csv"
             df_inv = parse_file_for_optimization(trimmed_sales_bytes, "sales_orders_complete.csv", _SALES_CM)
+
+            if inv_path.exists():
+                try:
+                    _INV_CM = {
+                        "sku": "ProductID",
+                        "warehouse": "WarehouseID",
+                        "stock_level": "CurrentStock",
+                    }
+                    inv_raw = pd.read_csv(inv_path)
+                    inv_raw.columns = [str(c).strip() for c in inv_raw.columns]
+                    if "ProductID" in inv_raw.columns and "CurrentStock" in inv_raw.columns:
+                        # Build latest-stock lookup: {(sku, warehouse): stock}
+                        stock_lookup = {}
+                        wh_col = "WarehouseID" if "WarehouseID" in inv_raw.columns else None
+                        for _, row in inv_raw.iterrows():
+                            sku_key = str(row.get("ProductID", "")).strip()
+                            wh_key = str(row.get(wh_col, "")).strip() if wh_col else None
+                            try:
+                                stk = float(str(row["CurrentStock"]).replace(",", ""))
+                                stock_lookup[(sku_key, wh_key)] = stk
+                            except (ValueError, TypeError):
+                                pass
+
+                        # Inject stock levels into df_inv
+                        def _lookup_stock(row):
+                            sku = str(row.get("sku", "")).strip()
+                            wh  = str(row.get("warehouse", "")).strip() if row.get("warehouse") else None
+                            v = stock_lookup.get((sku, wh))
+                            if v is None:
+                                v = stock_lookup.get((sku, None))
+                            return float(v) if v is not None else np.nan
+
+                        df_inv["stock_level"] = df_inv.apply(_lookup_stock, axis=1)
+                        logger.info(
+                            "Merged inventory.csv: %d / %d rows have stock data",
+                            df_inv["stock_level"].notna().sum(), len(df_inv),
+                        )
+                except Exception as merge_err:
+                    logger.warning("Could not merge inventory.csv stock levels: %s", merge_err)
+
             inv_result = run_inventory_optimization(
                 df=df_inv, lead_time_days=7, service_level=0.95,
                 order_cost=0, holding_cost_pct=0,
