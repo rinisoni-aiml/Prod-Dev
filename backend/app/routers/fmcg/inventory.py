@@ -164,13 +164,17 @@ async def optimize_inventory(body: OptimizeRequest, current_user=Depends(get_cur
         if not storage_path:
             raise HTTPException(status_code=400, detail="File has no storage path recorded")
 
-        # If the selected file is a supplementary file (no date/units), find the sales file
-        if not column_mapping.get("date") or not column_mapping.get("units_sold"):
+        # If the selected file is a supplementary file (no usable date/units), find the sales file.
+        # Also reject meta-placeholder values like "__skip__" that start with "__".
+        def _usable(val):
+            return bool(val and not str(val).startswith("__"))
+
+        if not _usable(column_mapping.get("date")) or not _usable(column_mapping.get("units_sold")):
             all_files = supabase.table("data_files").select("*").eq("user_id", uid).execute().data or []
             sales_meta = next(
                 (f for f in all_files
-                 if (f.get("column_mapping") or {}).get("date")
-                 and (f.get("column_mapping") or {}).get("units_sold")),
+                 if _usable((f.get("column_mapping") or {}).get("date"))
+                 and _usable((f.get("column_mapping") or {}).get("units_sold"))),
                 None,
             )
             if sales_meta is None:
