@@ -290,7 +290,7 @@ const ForecastingPage = () => {
             {
               label: 'Peak Forecast Day',
               value: metrics.peakDay
-                ? new Date(metrics.peakDay + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+                ? new Date(metrics.peakDay + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
                 : '—',
               sub: metrics.peakValue ? `${metrics.peakValue} units` : '',
             },
@@ -322,6 +322,21 @@ const ForecastingPage = () => {
               <div className="h-6 bg-muted rounded w-16" />
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Stale data warning — shown when all forecast dates are in the past */}
+      {metrics?.peakDay && new Date(metrics.peakDay + 'T00:00:00') < new Date() && (
+        <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 flex items-start gap-3">
+          <span className="text-warning text-lg leading-none mt-0.5">⚠</span>
+          <div>
+            <p className="text-sm font-semibold text-warning">Forecast covers past dates</p>
+            <p className="text-xs text-foreground-secondary mt-0.5">
+              Your data ends before today — the {horizon}-day forecast covers a historical period ending{' '}
+              <strong>{new Date(metrics.peakDay + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>.
+              Upload more recent sales data to get current predictions.
+            </p>
+          </div>
         </div>
       )}
 
@@ -364,7 +379,10 @@ const ForecastingPage = () => {
                   dataKey="date"
                   tick={{ fontSize: 10 }}
                   stroke="hsl(var(--foreground-secondary))"
-                  tickFormatter={(v) => v.slice(5)}
+                  tickFormatter={(v) => {
+                    const d = new Date(v + 'T00:00:00');
+                    return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+                  }}
                   interval="preserveStartEnd"
                 />
                 <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--foreground-secondary))" />

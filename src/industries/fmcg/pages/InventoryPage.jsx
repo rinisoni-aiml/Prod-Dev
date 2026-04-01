@@ -538,10 +538,16 @@ function OptimizationTab({ user }) {
             {running ? 'Optimizing…' : result ? 'Re-run Analysis' : 'Run Optimization'}
           </button>
           {result && !result.has_stock_data && (
-            <p className="text-xs text-warning flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3" />
-              No stock_level column found — Safety Stock and ROP are computed but current stock status is unknown. Upload a file with a stock column for accurate status.
-            </p>
+            <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 flex items-start gap-2 max-w-xl">
+              <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-warning">No stock data detected</p>
+                <p className="text-xs text-foreground-secondary mt-0.5">
+                  Your file has no stock level column — Safety Stock &amp; ROP are calculated from demand, but stockout/overstock status cannot be assessed.
+                  Upload a file with a <strong>Current Stock</strong> column for accurate status.
+                </p>
+              </div>
+            </div>
           )}
           {result && result.params && (
             <p className="text-xs text-foreground-secondary">
