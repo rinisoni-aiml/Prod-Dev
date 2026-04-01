@@ -14,65 +14,92 @@ router = APIRouter()
 # Absolute path to the bundled sample CSVs
 _SAMPLE_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "industries" / "fmcg" / "data"
 
+# ── BIG sample files (used for "Load Sample Data") ────────────────────────────
+# Columns: fmcg_sales_BIG.csv    → order_id, date, product_name, region, warehouse, quantity, price
+#          fmcg_inventory_BIG.csv → product_id, warehouse, stock, reorder_level, safety, updated_on
+#          fmcg_po_BIG.csv        → po_number, item, supplier_name, order_dt, delivery_dt, qty_ordered, status
+#          fmcg_products_BIG.csv  → sku, product, category, brand
+#          fmcg_wh_BIG.csv        → wh_id, name, location, capacity
+
 _SAMPLE_FILES = [
     {
-        "filename": "sales_orders_complete.csv",
+        "filename": "fmcg_sales_BIG.csv",
         "column_mapping": {
-            "date": "OrderDate",
-            "units_sold": "Quantity",
-            "sku": "ProductID",
-            "unit_price": "UnitPrice",
-            "region": "Region",
+            "date": "date",
+            "units_sold": "quantity",
+            "sku": "product_name",
+            "unit_price": "price",
+            "region": "region",
+            "warehouse": "warehouse",
             "__purpose__": "forecasting",
             "__sample__": True,
         },
     },
     {
-        "filename": "inventory.csv",
+        "filename": "fmcg_inventory_BIG.csv",
         "column_mapping": {
-            "sku": "ProductID",
-            "warehouse": "WarehouseID",
-            "stock_level": "CurrentStock",
+            "sku": "product_id",
+            "warehouse": "warehouse",
+            "stock_level": "stock",
             "__purpose__": "supplementary",
             "__sample__": True,
         },
     },
     {
-        "filename": "purchase_orders.csv",
+        "filename": "fmcg_po_BIG.csv",
         "column_mapping": {
-            "date": "PODate",
-            "units_sold": "Quantity",
-            "sku": "ProductID",
+            "date": "order_dt",
+            "units_sold": "qty_ordered",
+            "sku": "item",
             "__purpose__": "supplementary",
             "__sample__": True,
         },
     },
     {
-        "filename": "warehouses.csv",
+        "filename": "fmcg_products_BIG.csv",
         "column_mapping": {
-            "warehouse": "WarehouseID",
-            "region": "Region",
+            "sku": "sku",
+            "product_name": "product",
+            "category": "category",
+            "__purpose__": "supplementary",
+            "__sample__": True,
+        },
+    },
+    {
+        "filename": "fmcg_wh_BIG.csv",
+        "column_mapping": {
+            "warehouse": "wh_id",
             "__purpose__": "supplementary",
             "__sample__": True,
         },
     },
 ]
 
-# Sales orders column mapping used for inline ML analysis
+# Column mapping for the primary sales file (used in inline ML analysis)
+_SALES_FILENAME = "fmcg_sales_BIG.csv"
 _SALES_CM = {
-    "date": "OrderDate",
-    "units_sold": "Quantity",
-    "sku": "ProductID",
-    "unit_price": "UnitPrice",
-    "region": "Region",
+    "date": "date",
+    "units_sold": "quantity",
+    "sku": "product_name",
+    "unit_price": "price",
+    "region": "region",
+    "warehouse": "warehouse",
 }
 
-# Rows to keep from the large sales orders file
-_SALES_NROWS = 5000
+# Inventory BIG file mapping (for stock-level merge during inline analysis)
+_INV_FILENAME = "fmcg_inventory_BIG.csv"
+_INV_CM = {
+    "sku": "product_id",
+    "warehouse": "warehouse",
+    "stock_level": "stock",
+}
 
 # Prefix used in storage_path for sample files that live on disk, not in Supabase Storage.
 # The forecasting endpoint recognises this prefix and reads from the local filesystem.
 _LOCAL_SAMPLE_PREFIX = "_local_sample/fmcg/"
+
+# Supabase cache key for pre-computed sample results
+_SAMPLE_CACHE_RUN_ID = "sample_demo"
 
 
 @router.get("/sources")
@@ -104,18 +131,22 @@ async def delete_data_source(file_id: str, current_user=Depends(get_current_user
 @router.post("/load-sample")
 async def load_sample_data(current_user=Depends(get_current_user)):
     """
-    Register the bundled FMCG sample CSVs for the current user AND run
-    forecast + inventory optimisation so the dashboard is fully populated.
+    Register the bundled FMCG BIG sample CSVs for the current user AND populate
+    demand_history + inventory_items so the dashboard is fully loaded.
+
+    Loading strategy (fastest-first):
+      1. If the user already has sample data → return immediately (idempotent).
+      2. If fmcg_sample_cache contains run_id='sample_demo' → copy cached ML
+         results to the user's tables instantly (no reprocessing).
+      3. Fallback: run forecast + inventory optimisation inline and write results.
 
     No Supabase Storage uploads — files stay on disk and are read directly.
     The storage_path field uses a '_local_sample/fmcg/' prefix so the
     forecasting endpoint knows to read from the local filesystem.
-
-    Idempotent: if sample records already exist they are returned immediately.
     """
     uid = str(current_user.id)
 
-    # ── Idempotency ──────────────────────────────────────────────────────────
+    # ── 1. Idempotency ────────────────────────────────────────────────────────
     try:
         all_records = supabase.table("data_files").select("*").eq("user_id", uid).execute().data or []
         sample_records = [f for f in all_records if (f.get("column_mapping") or {}).get("__sample__")]
@@ -124,28 +155,17 @@ async def load_sample_data(current_user=Depends(get_current_user)):
     except Exception:
         pass
 
-    # ── Register files (no Storage upload — files live on disk) ──────────────
+    # ── Register file records (no Storage upload — files live on disk) ─────────
     created = []
-    trimmed_sales_bytes: bytes | None = None
-
     for sf in _SAMPLE_FILES:
         filepath = _SAMPLE_DATA_DIR / sf["filename"]
         if not filepath.exists():
             continue
         try:
-            raw_bytes = filepath.read_bytes()
-
-            if sf["filename"] == "sales_orders_complete.csv":
-                df_trim = pd.read_csv(io.BytesIO(raw_bytes), nrows=_SALES_NROWS)
-                trimmed_sales_bytes = df_trim.to_csv(index=False).encode()
-                file_size = len(trimmed_sales_bytes)
-            else:
-                file_size = len(raw_bytes)
-
+            file_size = filepath.stat().st_size
             record = {
                 "user_id": uid,
                 "file_name": sf["filename"],
-                # Marker path — not a real Supabase Storage path
                 "storage_path": f"{_LOCAL_SAMPLE_PREFIX}{sf['filename']}",
                 "file_size": file_size,
                 "column_mapping": sf["column_mapping"],
@@ -156,52 +176,72 @@ async def load_sample_data(current_user=Depends(get_current_user)):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to register {sf['filename']}: {e}")
 
-    # ── Run analysis inline (reads from memory — no network calls) ────────────
-    # Pre-populates demand_history + inventory_items so the dashboard loads
-    # instantly without triggering auto-analyze.
-    if trimmed_sales_bytes is not None:
+    # ── 2. Load from pre-computed cache (instant — no ML rerun) ───────────────
+    try:
+        cache_resp = (
+            supabase.table("fmcg_sample_cache")
+            .select("demand_data,inventory_result")
+            .eq("run_id", _SAMPLE_CACHE_RUN_ID)
+            .execute()
+        )
+        cache_rows = cache_resp.data or []
+        if cache_rows:
+            cache = cache_rows[0]
+
+            demand_rows = cache.get("demand_data") or []
+            if demand_rows:
+                user_demand_rows = [{**row, "user_id": uid} for row in demand_rows]
+                supabase.table("demand_history").delete().eq("user_id", uid).execute()
+                for i in range(0, len(user_demand_rows), 500):
+                    supabase.table("demand_history").insert(user_demand_rows[i : i + 500]).execute()
+                logger.info("Loaded %d demand rows from sample cache for user %s", len(demand_rows), uid)
+
+            inv_result = cache.get("inventory_result") or {}
+            if inv_result:
+                from app.routers.fmcg.inventory import _persist_inventory_items
+                _persist_inventory_items(uid, inv_result.get("by_sku", []), inv_result.get("by_warehouse", []))
+                logger.info("Loaded inventory results from sample cache for user %s", uid)
+
+            return created
+    except Exception as cache_err:
+        logger.warning("Sample cache miss or error (%s) — falling back to inline analysis", cache_err)
+
+    # ── 3. Fallback: run analysis inline ──────────────────────────────────────
+    sales_filepath = _SAMPLE_DATA_DIR / _SALES_FILENAME
+    if sales_filepath.exists():
         try:
-            from app.services.fmcg.forecast_service import (
-                parse_file_to_dataframe, run_all_skus_forecast,
-            )
-            from app.services.fmcg.inventory_optimizer import (
-                parse_file_for_optimization, run_inventory_optimization,
-            )
+            from app.services.fmcg.forecast_service import parse_file_to_dataframe, run_all_skus_forecast
+            from app.services.fmcg.inventory_optimizer import parse_file_for_optimization, run_inventory_optimization
             from app.routers.fmcg.forecasting import _persist_demand_history
             from app.routers.fmcg.inventory import _persist_inventory_items
             import numpy as np
 
-            df = parse_file_to_dataframe(trimmed_sales_bytes, "sales_orders_complete.csv", _SALES_CM)
+            raw_bytes = sales_filepath.read_bytes()
+
+            df = parse_file_to_dataframe(raw_bytes, _SALES_FILENAME, _SALES_CM)
             run_result = run_all_skus_forecast(df, 30)
             _persist_demand_history(uid, run_result.get("results", {}))
 
-            # For inventory optimization: merge stock levels from inventory.csv if available
-            inv_path = _SAMPLE_DATA_DIR / "inventory.csv"
-            df_inv = parse_file_for_optimization(trimmed_sales_bytes, "sales_orders_complete.csv", _SALES_CM)
+            df_inv = parse_file_for_optimization(raw_bytes, _SALES_FILENAME, _SALES_CM)
 
+            # Merge stock levels from fmcg_inventory_BIG.csv if available
+            inv_path = _SAMPLE_DATA_DIR / _INV_FILENAME
             if inv_path.exists():
                 try:
-                    _INV_CM = {
-                        "sku": "ProductID",
-                        "warehouse": "WarehouseID",
-                        "stock_level": "CurrentStock",
-                    }
                     inv_raw = pd.read_csv(inv_path)
                     inv_raw.columns = [str(c).strip() for c in inv_raw.columns]
-                    if "ProductID" in inv_raw.columns and "CurrentStock" in inv_raw.columns:
-                        # Build latest-stock lookup: {(sku, warehouse): stock}
+                    # Columns: product_id, warehouse, stock
+                    if "product_id" in inv_raw.columns and "stock" in inv_raw.columns:
                         stock_lookup = {}
-                        wh_col = "WarehouseID" if "WarehouseID" in inv_raw.columns else None
                         for _, row in inv_raw.iterrows():
-                            sku_key = str(row.get("ProductID", "")).strip()
-                            wh_key = str(row.get(wh_col, "")).strip() if wh_col else None
+                            sku_key = str(row.get("product_id", "")).strip()
+                            wh_key = str(row.get("warehouse", "")).strip() if "warehouse" in inv_raw.columns else None
                             try:
-                                stk = float(str(row["CurrentStock"]).replace(",", ""))
+                                stk = float(str(row["stock"]).replace(",", ""))
                                 stock_lookup[(sku_key, wh_key)] = stk
                             except (ValueError, TypeError):
                                 pass
 
-                        # Inject stock levels into df_inv
                         def _lookup_stock(row):
                             sku = str(row.get("sku", "")).strip()
                             wh  = str(row.get("warehouse", "")).strip() if row.get("warehouse") else None
@@ -212,11 +252,11 @@ async def load_sample_data(current_user=Depends(get_current_user)):
 
                         df_inv["stock_level"] = df_inv.apply(_lookup_stock, axis=1)
                         logger.info(
-                            "Merged inventory.csv: %d / %d rows have stock data",
-                            df_inv["stock_level"].notna().sum(), len(df_inv),
+                            "Merged %s: %d / %d rows have stock data",
+                            _INV_FILENAME, df_inv["stock_level"].notna().sum(), len(df_inv),
                         )
                 except Exception as merge_err:
-                    logger.warning("Could not merge inventory.csv stock levels: %s", merge_err)
+                    logger.warning("Could not merge %s stock levels: %s", _INV_FILENAME, merge_err)
 
             inv_result = run_inventory_optimization(
                 df=df_inv, lead_time_days=7, service_level=0.95,

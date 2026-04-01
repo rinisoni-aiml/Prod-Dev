@@ -1,0 +1,8 @@
+wh_id,name,location,capacity
+WH-AHM,Ahmedabad Hub,"Ahmedabad, Gujarat",20000
+WH-MUM,Mumbai Hub,"Mumbai, Maharashtra",30000
+WH-RAI,Raipur Depot,"Raipur, Chhattisgarh",15000
+WH-JAI,Jaipur Storage,"Jaipur, Rajasthan",18000
+WH-IND,Indore Hub,"Indore, MP",22000
+WH-DEL,Delhi Central,Delhi,25000
+WH-BLR,Bangalore Hub,"Bangalore, Karnataka",27000

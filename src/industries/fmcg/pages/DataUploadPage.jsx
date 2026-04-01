@@ -1,14 +1,14 @@
 import { useState, useCallback, useEffect } from 'react';
 import {
   Upload, FileText, Trash2, Download, RefreshCw, Plus, Loader2,
-  TrendingUp, Package, CheckCircle2,
+  TrendingUp, Package, CheckCircle2, AlertTriangle,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { useFmcgStore } from '@/stores/fmcgStore';
-import { forecastApi, inventoryApi } from '@/lib/api';
+import { forecastApi, inventoryApi, dataApi } from '@/lib/api';
 import { uploadDataFile, fetchDataFiles, deleteDataFile, getFileDownloadUrl } from '@/lib/dataFiles';
 import SchemaMapping, {
   FORECASTING_FIELDS,
@@ -16,6 +16,15 @@ import SchemaMapping, {
   autoMapHeaders,
   parseCSVPreview,
 } from '@/components/data/SchemaMapping';
+
+// ─── Sample filenames that trigger duplicate detection ────────────────────────
+const SAMPLE_FILENAMES = new Set([
+  'fmcg_sales_BIG.csv',
+  'fmcg_inventory_BIG.csv',
+  'fmcg_po_BIG.csv',
+  'fmcg_products_BIG.csv',
+  'fmcg_wh_BIG.csv',
+]);
 
 // ─── XLSX-aware file parser ───────────────────────────────────────────────────
 
@@ -37,13 +46,55 @@ async function parseFilePreview(file) {
   return { headers, rows };
 }
 
+// ─── Duplicate file detection modal ──────────────────────────────────────────
+
+const DuplicateSampleModal = ({ fileName, onUseSample, onUploadAnyway, onClose }) => (
+  <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center">
+    <div className="glass-card p-6 rounded-2xl max-w-sm w-full mx-4 shadow-xl">
+      <div className="flex items-start gap-3 mb-4">
+        <div className="h-9 w-9 rounded-lg bg-warning/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+          <AlertTriangle className="h-5 w-5 text-warning" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-foreground">File matches sample data</p>
+          <p className="text-xs text-foreground-secondary mt-1">
+            <span className="font-medium text-foreground">{fileName}</span> already exists as
+            sample data. Loading sample results is instant — no reprocessing needed.
+          </p>
+        </div>
+      </div>
+      <div className="flex gap-2 mt-5">
+        <button
+          onClick={onUseSample}
+          className="flex-1 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+        >
+          Use Sample Data
+        </button>
+        <button
+          onClick={onUploadAnyway}
+          className="flex-1 px-3 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted transition-colors"
+        >
+          Upload Anyway
+        </button>
+      </div>
+      <button
+        onClick={onClose}
+        className="mt-2 w-full px-3 py-1.5 rounded-lg text-xs text-foreground-secondary hover:bg-muted transition-colors"
+      >
+        Cancel
+      </button>
+    </div>
+  </div>
+);
+
 // ─── Upload section component ─────────────────────────────────────────────────
 
 const UploadSection = ({
   title, description, icon: Icon, accentClass, fields, purpose,
-  pendingFiles, setPendingFiles, user, onSaved,
+  pendingFiles, setPendingFiles, user, onSaved, onLoadSample,
 }) => {
   const [dragOver, setDragOver] = useState(false);
+  const [duplicatePrompt, setDuplicatePrompt] = useState(null); // { file }
 
   const processFile = useCallback(async (file) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -52,15 +103,27 @@ const UploadSection = ({
     return { file, id, headers, previewRows: rows, mapping, status: 'mapping', purpose };
   }, [fields, purpose]);
 
+  const addFiles = useCallback(async (files) => {
+    const processed = await Promise.all(files.map(processFile));
+    setPendingFiles((prev) => [...prev, ...processed]);
+    toast.success(`${files.length} file(s) added to ${title}`);
+  }, [processFile, setPendingFiles, title]);
+
   const handleFilesAdded = useCallback(async (fileList) => {
     const valid = Array.from(fileList).filter((f) =>
       f.name.endsWith('.csv') || f.name.endsWith('.xlsx') || f.name.endsWith('.xls')
     );
     if (valid.length === 0) { toast.error('Please upload CSV or Excel files'); return; }
-    const processed = await Promise.all(valid.map(processFile));
-    setPendingFiles((prev) => [...prev, ...processed]);
-    toast.success(`${valid.length} file(s) added to ${title}`);
-  }, [processFile, setPendingFiles, title]);
+
+    // Check each file for a sample filename match — prompt on first match found
+    const sampleMatch = valid.find((f) => SAMPLE_FILENAMES.has(f.name));
+    if (sampleMatch) {
+      setDuplicatePrompt({ file: sampleMatch, remaining: valid.filter((f) => f !== sampleMatch) });
+      return;
+    }
+
+    await addFiles(valid);
+  }, [addFiles]);
 
   const handleDrop = (e) => {
     e.preventDefault(); setDragOver(false); handleFilesAdded(e.dataTransfer.files);
@@ -90,7 +153,6 @@ const UploadSection = ({
     if (!entry || !user) return;
     setPendingFiles((prev) => prev.map((f) => f.id === fileId ? { ...f, status: 'processing' } : f));
     try {
-      // Embed purpose in the column_mapping so it can be filtered later
       const mappingWithPurpose = { ...entry.mapping, __purpose__: purpose };
       const saved = await uploadDataFile(user.id, entry.file, mappingWithPurpose, entry.previewRows.length);
       setPendingFiles((prev) => prev.filter((f) => f.id !== fileId));
@@ -101,72 +163,102 @@ const UploadSection = ({
     }
   };
 
-  return (
-    <div className="glass-card rounded-xl overflow-hidden">
-      {/* Section header */}
-      <div className={`px-5 py-4 border-b border-border flex items-center gap-3 ${accentClass}`}>
-        <div className="h-8 w-8 rounded-lg bg-current/10 flex items-center justify-center flex-shrink-0">
-          <Icon className="h-4 w-4" />
-        </div>
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-          <p className="text-xs text-foreground-secondary">{description}</p>
-        </div>
-        {pendingFiles.length > 0 && (
-          <button
-            onClick={handleBrowse}
-            className="ml-auto text-xs text-primary hover:text-primary/80 flex items-center gap-1 font-medium"
-          >
-            <Plus className="h-3.5 w-3.5" /> Add more
-          </button>
-        )}
-      </div>
+  // Duplicate modal handlers
+  const handleUseSample = useCallback(async () => {
+    const prompt = duplicatePrompt;
+    setDuplicatePrompt(null);
+    await onLoadSample();
+    // If there were other (non-sample) files in the batch, add them normally
+    if (prompt?.remaining?.length) {
+      const nonSample = prompt.remaining.filter((f) => !SAMPLE_FILENAMES.has(f.name));
+      if (nonSample.length) await addFiles(nonSample);
+    }
+  }, [duplicatePrompt, onLoadSample, addFiles]);
 
-      {/* Drop zone */}
-      {pendingFiles.length === 0 && (
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          onClick={handleBrowse}
-          className={`m-4 border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
-            dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-          }`}
-        >
-          <Upload className="h-7 w-7 text-foreground-secondary mx-auto mb-2" />
-          <p className="text-sm text-foreground-secondary">Drag & drop CSV or Excel files here</p>
-          <p className="text-xs text-foreground-secondary mt-1">or click to browse · Multiple files supported</p>
-        </div>
+  const handleUploadAnyway = useCallback(async () => {
+    const prompt = duplicatePrompt;
+    setDuplicatePrompt(null);
+    const allFiles = [prompt.file, ...(prompt.remaining || [])];
+    await addFiles(allFiles);
+  }, [duplicatePrompt, addFiles]);
+
+  return (
+    <>
+      {duplicatePrompt && (
+        <DuplicateSampleModal
+          fileName={duplicatePrompt.file.name}
+          onUseSample={handleUseSample}
+          onUploadAnyway={handleUploadAnyway}
+          onClose={() => setDuplicatePrompt(null)}
+        />
       )}
 
-      {/* Schema mapping for pending files */}
-      {pendingFiles.length > 0 && (
-        <div className="p-4">
-          <SchemaMapping
-            files={pendingFiles}
-            onUpdateMapping={handleUpdateMapping}
-            onProcess={handleProcess}
-            onResetMapping={handleResetMapping}
-            onRemoveFile={handleRemoveFile}
-            platformFields={fields}
-          />
-          {/* Add more after files exist */}
+      <div className="glass-card rounded-xl overflow-hidden">
+        {/* Section header */}
+        <div className={`px-5 py-4 border-b border-border flex items-center gap-3 ${accentClass}`}>
+          <div className="h-8 w-8 rounded-lg bg-current/10 flex items-center justify-center flex-shrink-0">
+            <Icon className="h-4 w-4" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+            <p className="text-xs text-foreground-secondary">{description}</p>
+          </div>
+          {pendingFiles.length > 0 && (
+            <button
+              onClick={handleBrowse}
+              className="ml-auto text-xs text-primary hover:text-primary/80 flex items-center gap-1 font-medium"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add more
+            </button>
+          )}
+        </div>
+
+        {/* Drop zone */}
+        {pendingFiles.length === 0 && (
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
             onClick={handleBrowse}
-            className={`mt-3 border border-dashed rounded-lg p-3 text-center transition-colors cursor-pointer ${
-              dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'
+            className={`m-4 border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
+              dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
             }`}
           >
-            <p className="text-xs text-foreground-secondary flex items-center justify-center gap-1">
-              <Plus className="h-3 w-3" /> Drop more files here
-            </p>
+            <Upload className="h-7 w-7 text-foreground-secondary mx-auto mb-2" />
+            <p className="text-sm text-foreground-secondary">Drag & drop CSV or Excel files here</p>
+            <p className="text-xs text-foreground-secondary mt-1">or click to browse · Multiple files supported</p>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+
+        {/* Schema mapping for pending files */}
+        {pendingFiles.length > 0 && (
+          <div className="p-4">
+            <SchemaMapping
+              files={pendingFiles}
+              onUpdateMapping={handleUpdateMapping}
+              onProcess={handleProcess}
+              onResetMapping={handleResetMapping}
+              onRemoveFile={handleRemoveFile}
+              platformFields={fields}
+            />
+            {/* Add more after files exist */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={handleBrowse}
+              className={`mt-3 border border-dashed rounded-lg p-3 text-center transition-colors cursor-pointer ${
+                dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'
+              }`}
+            >
+              <p className="text-xs text-foreground-secondary flex items-center justify-center gap-1">
+                <Plus className="h-3 w-3" /> Drop more files here
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 };
 
@@ -233,6 +325,24 @@ const DataUploadPage = () => {
     toast.success('File uploaded!');
     triggerAutoRun(savedFileId, purpose);
   }, [loadSavedFiles, triggerAutoRun]);
+
+  // Called when user picks "Use Sample Data" from the duplicate modal
+  const handleLoadSample = useCallback(async () => {
+    setAutoRun({ message: 'Loading sample data…', step: 'sample', done: false });
+    try {
+      await dataApi.loadSampleData();
+      await loadSavedFiles();
+      queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-demand-trend'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-inventory-snapshot'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-top-skus'] });
+      setAutoRun({ message: 'Sample data loaded!', step: 'sample', done: true });
+      setTimeout(() => setAutoRun(null), 3000);
+    } catch {
+      setAutoRun(null);
+      toast.error('Failed to load sample data');
+    }
+  }, [loadSavedFiles, queryClient]);
 
   const handleDelete = async (file) => {
     try {
@@ -315,6 +425,7 @@ const DataUploadPage = () => {
         setPendingFiles={setForecastFiles}
         user={user}
         onSaved={handleFileSaved}
+        onLoadSample={handleLoadSample}
       />
 
       {/* ── Inventory Optimization section ── */}
@@ -329,6 +440,7 @@ const DataUploadPage = () => {
         setPendingFiles={setInventoryFiles}
         user={user}
         onSaved={handleFileSaved}
+        onLoadSample={handleLoadSample}
       />
 
       {/* ── Saved files ── */}
