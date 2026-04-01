@@ -40,23 +40,59 @@ def _clean_numeric(series: pd.Series) -> pd.Series:
 
 def _parse_dates(series: pd.Series) -> pd.Series:
     """
-    Try multiple date formats in order.
-    Handles: ISO, DD/MM/YYYY, MM/DD/YY, 'Jan 2024', 'Jan-24', epoch ints.
-    Falls back to pandas inference.
+    Adaptive multi-strategy date parser — handles virtually any format:
+    ISO 8601, DD/MM/YYYY, MM/DD/YYYY, DD-MM-YY, 'Jan 2024', 'January 2024',
+    'Jan-24', '15-Jan-2024', '20240115', epoch ints/ms, dot-separated EU dates,
+    and anything else python-dateutil can read (row-by-row fallback).
     """
-    # Try pandas inference first (handles ISO, DD-MM-YYYY, MM/DD/YY etc.)
-    parsed = pd.to_datetime(series, infer_datetime_format=True, errors="coerce")
-    unparsed_mask = parsed.isna() & series.notna() & (series.astype(str).str.strip() != "")
+    import dateutil.parser as dparser
 
-    if unparsed_mask.any():
-        # "Jan 2024", "Jan-24", "January 2024"
-        for fmt in ("%b %Y", "%B %Y", "%b-%Y", "%b-%y", "%B-%y"):
-            remaining = parsed.isna() & series.notna()
-            if not remaining.any():
-                break
-            parsed[remaining] = pd.to_datetime(
-                series[remaining], format=fmt, errors="coerce"
-            )
+    raw = series.astype(str).str.strip()
+    parsed = pd.Series([pd.NaT] * len(series), index=series.index, dtype="datetime64[ns]")
+    missing = lambda: parsed.isna() & series.notna() & (raw != "nan") & (raw != "") & (raw != "NaT")
+
+    # ── 1. Numeric epoch (unix seconds 9-10 digits, or milliseconds 13 digits) ─
+    epoch_mask = raw.str.fullmatch(r"\d{9,13}")
+    if epoch_mask.any():
+        nums = pd.to_numeric(raw[epoch_mask], errors="coerce")
+        secs = nums.where(nums < 1e12, nums / 1000)
+        parsed[epoch_mask] = pd.to_datetime(secs, unit="s", errors="coerce")
+
+    # ── 2. Pandas inference with both dayfirst variants — pick most successful ─
+    if missing().any():
+        rem = missing()
+        p_dmy = pd.to_datetime(raw[rem], dayfirst=True,  errors="coerce")
+        p_mdy = pd.to_datetime(raw[rem], dayfirst=False, errors="coerce")
+        # Prefer dayfirst=True; only use dayfirst=False where dayfirst=True failed
+        parsed[rem] = p_dmy.where(p_dmy.notna(), p_mdy)
+
+    # ── 3. Explicit format list for patterns pandas inference misses ───────────
+    _EXTRA_FMTS = [
+        "%b %Y", "%B %Y", "%b-%Y", "%b-%y", "%B-%y",  # "Jan 2024", "Jan-24"
+        "%d %b %Y", "%d %B %Y",                         # "15 Jan 2024"
+        "%d-%b-%Y", "%d-%b-%y",                         # "15-Jan-2024"
+        "%b %d %Y", "%B %d %Y",                         # "Jan 15 2024"
+        "%Y%m%d",                                        # "20240115"
+        "%d.%m.%Y", "%d.%m.%y",                         # EU dot-separated
+        "%m-%d-%Y", "%m/%d/%Y",                         # explicit US
+        "%d/%m/%Y", "%d-%m-%Y",                         # explicit UK
+        "%Y/%m/%d",                                      # ISO with slashes
+    ]
+    for fmt in _EXTRA_FMTS:
+        if not missing().any():
+            break
+        rem = missing()
+        parsed[rem] = pd.to_datetime(raw[rem], format=fmt, errors="coerce")
+
+    # ── 4. dateutil row-by-row — catches almost any remaining human-readable fmt
+    if missing().any():
+        def _try_dateutil(v):
+            try:
+                return pd.Timestamp(dparser.parse(v, dayfirst=True))
+            except Exception:
+                return pd.NaT
+        rem = missing()
+        parsed[rem] = raw[rem].apply(_try_dateutil)
 
     return parsed
 
