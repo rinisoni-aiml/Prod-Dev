@@ -21,7 +21,7 @@ export const uploadDataFile = async (userId, file, columnMapping = {}, rowCount 
     storage_path: storagePath,
     row_count: rowCount,
     column_mapping: columnMapping,
-  }).select().single();
+  }).select().maybeSingle();
 
   if (dbError) throw dbError;
   return data;

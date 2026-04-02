@@ -22,7 +22,7 @@ export const useAuthStore = create((set) => ({
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
     if (data) set({ profile: data });
     return data;
   },
