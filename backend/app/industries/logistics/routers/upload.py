@@ -126,6 +126,7 @@ async def load_sample_data(current_user=Depends(get_current_user)):
         pass
 
     results = []
+    _meta_records: list[dict] = []
     for filename in SAMPLE_FILES_ORDER:
         filepath = SAMPLE_DATA_DIR / filename
         if not filepath.exists():
@@ -150,55 +151,50 @@ async def load_sample_data(current_user=Depends(get_current_user)):
                 "error": result.get("error"),
             })
 
-            # Write a data_files record so the file appears in the Data Upload page
+            # Collect metadata for a single batch upsert at the end
             if result.get("success"):
-                try:
-                    record = {
-                        "user_id": uid,
-                        "file_name": filename,
-                        "storage_path": f"logistics/{uid}/sample/{filename}",
-                        "file_size": len(content),
-                        "row_count": rows_inserted,
-                        "column_mapping": {
-                            "__table__": table_name,
-                            "__purpose__": "logistics",
-                            "__sample__": True,
-                        },
-                    }
-                    existing_file = supabase.table("data_files").select("id") \
-                        .eq("user_id", uid).eq("file_name", filename).execute()
-                    if existing_file.data:
-                        supabase.table("data_files").update(record) \
-                            .eq("id", existing_file.data[0]["id"]).execute()
-                    else:
-                        supabase.table("data_files").insert(record).execute()
-                except Exception as meta_err:
-                    logger.warning("Could not write data_files record for %s: %s", filename, meta_err)
+                _meta_records.append({
+                    "user_id": uid,
+                    "file_name": filename,
+                    "storage_path": f"logistics/{uid}/sample/{filename}",
+                    "file_size": len(content),
+                    "row_count": rows_inserted,
+                    "column_mapping": {
+                        "__table__": table_name,
+                        "__purpose__": "logistics",
+                        "__sample__": True,
+                    },
+                })
 
         except Exception as e:
             results.append({"file": filename, "success": False, "error": str(e)})
 
+    # Single batch upsert for all data_files metadata (replaces 24 individual round trips)
+    if _meta_records:
+        try:
+            supabase.table("data_files").upsert(
+                _meta_records, on_conflict="user_id,file_name"
+            ).execute()
+        except Exception as meta_err:
+            logger.warning("Could not batch-write data_files records: %s", meta_err)
+
     total_inserted = sum(r.get("rows_inserted", 0) for r in results)
     successful = [r for r in results if r.get("success")]
 
-    # Run the proper 13-function scoring engine over all shipments
-    rescore_result = {"success": 0, "failed": 0, "total": 0}
+    # shipment_risk_snapshots.xlsx is already loaded above with pre-computed scores —
+    # no need to rescore here. Invalidate the insight cache so stale entries are cleared.
     try:
-        rescore_result = rescore_all_for_user(uid)
         invalidate_all_insights(uid)
-        logger.info("Rescored uid=%s: %s", uid, rescore_result)
-    except Exception as score_err:
-        logger.warning("Post-load rescore failed for uid=%s: %s", uid, score_err)
+    except Exception:
+        pass
 
     return {
         "success": True,
         "message": (
             f"Sample data loaded: {len(successful)}/{len(SAMPLE_FILES_ORDER)} files processed, "
-            f"{total_inserted} rows inserted. "
-            f"{rescore_result['success']} shipments rescored."
+            f"{total_inserted} rows inserted."
         ),
         "results": results,
-        "rescore": rescore_result,
     }
 
 

@@ -2,7 +2,7 @@ import io
 import logging
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File
 from app.dependencies import get_current_user
 from app.utils.supabase_client import supabase
 from pathlib import Path
@@ -128,8 +128,66 @@ async def delete_data_source(file_id: str, current_user=Depends(get_current_user
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _run_inline_sample_analysis(uid: str) -> None:
+    """Background task: run forecast + inventory optimisation for the sample data."""
+    sales_filepath = _SAMPLE_DATA_DIR / _SALES_FILENAME
+    if not sales_filepath.exists():
+        return
+    try:
+        from app.services.fmcg.forecast_service import parse_file_to_dataframe, run_all_skus_forecast
+        from app.services.fmcg.inventory_optimizer import parse_file_for_optimization, run_inventory_optimization
+        from app.routers.fmcg.forecasting import _persist_demand_history
+        from app.routers.fmcg.inventory import _persist_inventory_items
+        import numpy as np
+
+        raw_bytes = sales_filepath.read_bytes()
+
+        df = parse_file_to_dataframe(raw_bytes, _SALES_FILENAME, _SALES_CM)
+        run_result = run_all_skus_forecast(df, 30)
+        _persist_demand_history(uid, run_result.get("results", {}))
+
+        df_inv = parse_file_for_optimization(raw_bytes, _SALES_FILENAME, _SALES_CM)
+
+        inv_path = _SAMPLE_DATA_DIR / _INV_FILENAME
+        if inv_path.exists():
+            try:
+                inv_raw = pd.read_csv(inv_path)
+                inv_raw.columns = [str(c).strip() for c in inv_raw.columns]
+                if "product_id" in inv_raw.columns and "stock" in inv_raw.columns:
+                    stock_lookup = {}
+                    for _, row in inv_raw.iterrows():
+                        sku_key = str(row.get("product_id", "")).strip()
+                        wh_key = str(row.get("warehouse", "")).strip() if "warehouse" in inv_raw.columns else None
+                        try:
+                            stk = float(str(row["stock"]).replace(",", ""))
+                            stock_lookup[(sku_key, wh_key)] = stk
+                        except (ValueError, TypeError):
+                            pass
+
+                    def _lookup_stock(row):
+                        sku = str(row.get("sku", "")).strip()
+                        wh  = str(row.get("warehouse", "")).strip() if row.get("warehouse") else None
+                        v = stock_lookup.get((sku, wh))
+                        if v is None:
+                            v = stock_lookup.get((sku, None))
+                        return float(v) if v is not None else np.nan
+
+                    df_inv["stock_level"] = df_inv.apply(_lookup_stock, axis=1)
+            except Exception as merge_err:
+                logger.warning("Could not merge %s stock levels: %s", _INV_FILENAME, merge_err)
+
+        inv_result = run_inventory_optimization(
+            df=df_inv, lead_time_days=7, service_level=0.95,
+            order_cost=0, holding_cost_pct=0,
+        )
+        _persist_inventory_items(uid, inv_result.get("by_sku", []), inv_result.get("by_warehouse", []))
+        logger.info("Background sample analysis complete for user %s", uid)
+    except Exception as e:
+        logger.warning("Background sample analysis failed: %s", e)
+
+
 @router.post("/load-sample")
-async def load_sample_data(current_user=Depends(get_current_user)):
+async def load_sample_data(background_tasks: BackgroundTasks, current_user=Depends(get_current_user)):
     """
     Register the bundled FMCG BIG sample CSVs for the current user AND populate
     demand_history + inventory_items so the dashboard is fully loaded.
@@ -206,66 +264,9 @@ async def load_sample_data(current_user=Depends(get_current_user)):
     except Exception as cache_err:
         logger.warning("Sample cache miss or error (%s) — falling back to inline analysis", cache_err)
 
-    # ── 3. Fallback: run analysis inline ──────────────────────────────────────
-    sales_filepath = _SAMPLE_DATA_DIR / _SALES_FILENAME
-    if sales_filepath.exists():
-        try:
-            from app.services.fmcg.forecast_service import parse_file_to_dataframe, run_all_skus_forecast
-            from app.services.fmcg.inventory_optimizer import parse_file_for_optimization, run_inventory_optimization
-            from app.routers.fmcg.forecasting import _persist_demand_history
-            from app.routers.fmcg.inventory import _persist_inventory_items
-            import numpy as np
-
-            raw_bytes = sales_filepath.read_bytes()
-
-            df = parse_file_to_dataframe(raw_bytes, _SALES_FILENAME, _SALES_CM)
-            run_result = run_all_skus_forecast(df, 30)
-            _persist_demand_history(uid, run_result.get("results", {}))
-
-            df_inv = parse_file_for_optimization(raw_bytes, _SALES_FILENAME, _SALES_CM)
-
-            # Merge stock levels from fmcg_inventory_BIG.csv if available
-            inv_path = _SAMPLE_DATA_DIR / _INV_FILENAME
-            if inv_path.exists():
-                try:
-                    inv_raw = pd.read_csv(inv_path)
-                    inv_raw.columns = [str(c).strip() for c in inv_raw.columns]
-                    # Columns: product_id, warehouse, stock
-                    if "product_id" in inv_raw.columns and "stock" in inv_raw.columns:
-                        stock_lookup = {}
-                        for _, row in inv_raw.iterrows():
-                            sku_key = str(row.get("product_id", "")).strip()
-                            wh_key = str(row.get("warehouse", "")).strip() if "warehouse" in inv_raw.columns else None
-                            try:
-                                stk = float(str(row["stock"]).replace(",", ""))
-                                stock_lookup[(sku_key, wh_key)] = stk
-                            except (ValueError, TypeError):
-                                pass
-
-                        def _lookup_stock(row):
-                            sku = str(row.get("sku", "")).strip()
-                            wh  = str(row.get("warehouse", "")).strip() if row.get("warehouse") else None
-                            v = stock_lookup.get((sku, wh))
-                            if v is None:
-                                v = stock_lookup.get((sku, None))
-                            return float(v) if v is not None else np.nan
-
-                        df_inv["stock_level"] = df_inv.apply(_lookup_stock, axis=1)
-                        logger.info(
-                            "Merged %s: %d / %d rows have stock data",
-                            _INV_FILENAME, df_inv["stock_level"].notna().sum(), len(df_inv),
-                        )
-                except Exception as merge_err:
-                    logger.warning("Could not merge %s stock levels: %s", _INV_FILENAME, merge_err)
-
-            inv_result = run_inventory_optimization(
-                df=df_inv, lead_time_days=7, service_level=0.95,
-                order_cost=0, holding_cost_pct=0,
-            )
-            _persist_inventory_items(uid, inv_result.get("by_sku", []), inv_result.get("by_warehouse", []))
-
-        except Exception as e:
-            logger.warning("Inline sample analysis failed (dashboard will auto-analyze): %s", e)
+    # ── 3. Fallback: run analysis in the background (returns immediately) ────────
+    background_tasks.add_task(_run_inline_sample_analysis, uid)
+    logger.info("Scheduled background sample analysis for user %s", uid)
 
     return created
 
