@@ -139,7 +139,7 @@ async def load_sample_data(current_user=Depends(get_current_user)):
             # is loaded separately and would overwrite auto-computed snapshots anyway.
             result = process_file(
                 content, filename, uid, supabase,
-                max_rows=500, skip_auto_risk=True,
+                skip_auto_risk=True,
             )
             rows_inserted = result.get("rows_inserted", 0)
             table_name = result.get("table")

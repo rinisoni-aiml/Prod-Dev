@@ -162,7 +162,7 @@ def build_dashboard_view(uid: str) -> dict[str, Any]:
     vendors = _to_records(get_vendors(uid))
     trucks = _to_records(get_trucks(uid))
     drivers = _to_records(get_drivers(uid))
-    snapshot_rows = _latest_snapshot_rows(_to_records(get_risk_snapshots(uid, limit=5000)))
+    snapshot_rows = _latest_snapshot_rows(_to_records(get_risk_snapshots(uid, limit=50000)))
     summary = get_insights_summary(uid)
 
     snapshot_overall_scores = [_num(row.get("overall_risk_score")) for row in snapshot_rows]
@@ -293,10 +293,10 @@ def build_dashboard_view(uid: str) -> dict[str, Any]:
 
 # ─── Alerts View ───────────────────────────────────────────────────────────────
 
-def build_alerts_view(uid: str, limit: int = 300) -> list[dict[str, Any]]:
+def build_alerts_view(uid: str, limit: int = 50000) -> list[dict[str, Any]]:
     logger.info("Building alerts view for uid=%s", uid)
-    snapshots = _to_records(get_risk_snapshots(uid, limit=limit))
-    shipments = {str(row.get("shipment_id")): row for row in _to_records(get_shipments(uid, limit=limit))}
+    snapshots = _to_records(get_risk_snapshots(uid, limit=50000))
+    shipments = {str(row.get("shipment_id")): row for row in _to_records(get_shipments(uid, limit=50000))}
     trucks = _to_records(get_trucks(uid))
     drivers = _to_records(get_drivers(uid))
     vendors = _to_records(get_vendors(uid))
@@ -473,7 +473,7 @@ def build_compliance_view(uid: str) -> dict[str, Any]:
 
 def build_risk_analytics_view(uid: str) -> dict[str, Any]:
     logger.info("Building risk analytics view for uid=%s", uid)
-    snapshot_rows = _latest_snapshot_rows(_to_records(get_risk_snapshots(uid, limit=5000)))
+    snapshot_rows = _latest_snapshot_rows(_to_records(get_risk_snapshots(uid, limit=50000)))
     routes = _to_records(get_routes(uid))
     vendors = _to_records(get_vendors(uid))
     market = _to_records(get_market_intelligence(uid))
@@ -561,10 +561,10 @@ def build_risk_analytics_view(uid: str) -> dict[str, Any]:
 
 # ─── Shipment Risk View ────────────────────────────────────────────────────────
 
-def build_shipment_risk_view(uid: str, shipment_id: Optional[str] = None, limit: int = 300) -> dict[str, Any]:
+def build_shipment_risk_view(uid: str, shipment_id: Optional[str] = None, limit: int = 50000) -> dict[str, Any]:
     logger.info("Building shipment risk view for uid=%s", uid)
-    shipments = _to_records(get_shipments(uid, limit=limit))
-    snapshots = _to_records(get_risk_snapshots(uid, limit=max(limit, 500)))
+    shipments = _to_records(get_shipments(uid, limit=50000))
+    snapshots = _to_records(get_risk_snapshots(uid, limit=50000))
     if not shipments:
         return {"shipments": [], "selected": None}
 
@@ -605,8 +605,8 @@ def build_shipment_risk_view(uid: str, shipment_id: Optional[str] = None, limit:
 def build_vendor_intel_view(uid: str, vendor_id: Optional[str] = None) -> dict[str, Any]:
     logger.info("Building vendor intel view for uid=%s", uid)
     vendors = _to_records(get_vendors(uid))
-    shipments = _to_records(get_shipments(uid, limit=5000))
-    snapshot_rows = _latest_snapshot_rows(_to_records(get_risk_snapshots(uid, limit=5000)))
+    shipments = _to_records(get_shipments(uid, limit=50000))
+    snapshot_rows = _latest_snapshot_rows(_to_records(get_risk_snapshots(uid, limit=50000)))
 
     if not vendors:
         return {"vendors": [], "selected": None}

@@ -97,7 +97,7 @@ async def master_summary(current_user=Depends(get_current_user)):
 
 @router.get("/shipments")
 async def shipments(
-    limit: int = Query(500, ge=1, le=2000),
+    limit: int = Query(50000, ge=1, le=100000),
     status: str = Query(None),
     current_user=Depends(get_current_user),
 ):
@@ -210,7 +210,7 @@ async def trucks(current_user=Depends(get_current_user)):
 
 @router.get("/risk/snapshots")
 async def risk_snapshots(
-    limit: int = Query(300, ge=1, le=2000),
+    limit: int = Query(50000, ge=1, le=100000),
     current_user=Depends(get_current_user),
 ):
     uid = str(current_user.id)

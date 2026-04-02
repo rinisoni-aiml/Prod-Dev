@@ -22,7 +22,7 @@ def _safe_float(v, default: float = 0.0) -> float:
         return default
 
 
-def _q(uid: str, table: str, select: str = "*", limit: int = 5000, **filters) -> list[dict]:
+def _q(uid: str, table: str, select: str = "*", limit: int = 50000, **filters) -> list[dict]:
     """Generic Supabase select with user_id filter."""
     try:
         q = supabase.table(table).select(select).eq("user_id", uid).limit(limit)
@@ -36,7 +36,7 @@ def _q(uid: str, table: str, select: str = "*", limit: int = 5000, **filters) ->
 
 # ─── Shipments ─────────────────────────────────────────────────────────────────
 
-def get_shipments(uid: str, limit: int = 500, status: Optional[str] = None) -> list[dict]:
+def get_shipments(uid: str, limit: int = 50000, status: Optional[str] = None) -> list[dict]:
     try:
         q = (
             supabase.table("lg_shipments")
@@ -247,7 +247,7 @@ def get_shipment_financials(uid: str) -> list[dict]:
 
 # ─── Risk ──────────────────────────────────────────────────────────────────────
 
-def get_risk_snapshots(uid: str, limit: int = 300) -> list[dict]:
+def get_risk_snapshots(uid: str, limit: int = 50000) -> list[dict]:
     try:
         snaps = (
             supabase.table("lg_shipment_risk_snapshots")
@@ -277,7 +277,7 @@ def get_risk_snapshots(uid: str, limit: int = 300) -> list[dict]:
 
 def get_high_risk_shipments(uid: str) -> list[dict]:
     high_threshold = float(RISK_THRESHOLDS.get("MEDIUM", 60))
-    snaps = get_risk_snapshots(uid, limit=1000)
+    snaps = get_risk_snapshots(uid, limit=50000)
     return [r for r in snaps if _safe_float(r.get("overall_risk_score")) >= high_threshold]
 
 
@@ -345,7 +345,7 @@ def get_routes(uid: str) -> list[dict]:
 
 def get_master_summary(uid: str) -> list[dict]:
     # Build master summary from risk snapshots + shipments
-    snaps = get_risk_snapshots(uid, limit=2000)
+    snaps = get_risk_snapshots(uid, limit=50000)
     return snaps
 
 

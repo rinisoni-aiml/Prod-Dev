@@ -36,7 +36,7 @@ async def get_dashboard_view(current_user=Depends(get_current_user)):
 
 @router.get("/alerts")
 async def get_alerts_view(
-    limit: int = Query(300, ge=1, le=1000),
+    limit: int = Query(50000, ge=1, le=100000),
     current_user=Depends(get_current_user),
 ):
     uid = str(current_user.id)
@@ -115,7 +115,7 @@ async def get_vendor_intel_view(
 @router.get("/shipment-risk")
 async def get_shipment_risk_view(
     shipment_id: str | None = Query(None),
-    limit: int = Query(300, ge=1, le=1000),
+    limit: int = Query(50000, ge=1, le=100000),
     current_user=Depends(get_current_user),
 ):
     uid = str(current_user.id)
