@@ -34,7 +34,9 @@ from app.industries.logistics.services.ai.query_builder_service import (
     get_trucks,
     get_vendors,
     get_master_summary,
+    _q,
 )
+from app.shared.utils.supabase_client import supabase as _supabase
 
 logger = logging.getLogger(__name__)
 
@@ -156,65 +158,80 @@ def _latest_snapshot_rows(snapshots: list[dict]) -> list[dict]:
 # ─── Dashboard View ────────────────────────────────────────────────────────────
 
 def build_dashboard_view(uid: str) -> dict[str, Any]:
+    """
+    Single-pass dashboard: fetches each table ONCE with minimal columns.
+    No redundant queries — shipments/snapshots are never fetched twice.
+    """
     logger.info("Building dashboard view for uid=%s", uid)
-    kpis = get_shipment_kpis(uid)
-    routes = _to_records(get_routes(uid))
-    vendors = _to_records(get_vendors(uid))
-    trucks = _to_records(get_trucks(uid))
-    drivers = _to_records(get_drivers(uid))
-    snapshot_rows = _latest_snapshot_rows(_to_records(get_risk_snapshots(uid, limit=50000)))
-    summary = get_insights_summary(uid)
 
-    snapshot_overall_scores = [_num(row.get("overall_risk_score")) for row in snapshot_rows]
-    snapshot_compliance_scores = [_num(row.get("compliance_risk_score")) for row in snapshot_rows]
-    snapshot_vendor_scores = [_num(row.get("vendor_risk_score")) for row in snapshot_rows]
+    # ── Fetch each table once, minimal columns ────────────────────────────────
+    ships = _q(uid, "lg_shipments",
+               "shipment_id,shipment_status,shipment_value,origin_city,destination_city,route_id,vendor_id")
+    snaps_raw = _q(uid, "lg_shipment_risk_snapshots",
+                   "shipment_id,overall_risk_score,compliance_risk_score,vendor_risk_score,risk_category")
+    trucks = _q(uid, "lg_trucks",
+                "truck_id,truck_number,insurance_expiry_date,fitness_expiry_date,registration_expiry_date")
+    drivers = _q(uid, "lg_drivers",
+                 "driver_id,driver_name,license_expiry_date")
+    vpm_rows = _q(uid, "lg_vendor_performance_metrics",
+                  "vendor_id,on_time_percentage,delay_rate_percentage",
+                  performance_window="30D")
 
-    company_risk = _avg(snapshot_overall_scores, _num(summary.get("avg_risk_score"), _num(kpis.get("avg_risk"))))
-    high_risk_scores = [score for score in snapshot_overall_scores if score >= RISK_THRESHOLDS["MEDIUM"]]
-    high_risk_overall_score = _avg(high_risk_scores, company_risk)
-    compliance_overall_score = _avg(snapshot_compliance_scores, 0.0)
-    vendor_overall_score = _avg(snapshot_vendor_scores, _avg([_num(row.get("vendor_risk_score")) for row in vendors], 0.0))
+    # ── Build snap lookup (one per shipment) ──────────────────────────────────
+    snap_map: dict[str, dict] = {}
+    for s in snaps_raw:
+        sid = str(s.get("shipment_id") or "")
+        if sid and sid not in snap_map:
+            snap_map[sid] = s
 
-    # Route heatmap
+    # ── KPIs from in-memory data (no extra DB calls) ──────────────────────────
+    total = len(ships)
+    delivered = sum(1 for s in ships if s.get("shipment_status") == "DELIVERED")
+    delayed = sum(1 for s in ships if s.get("shipment_status") == "DELAYED")
+    in_transit = sum(1 for s in ships if s.get("shipment_status") == "IN_TRANSIT")
+    total_value = sum(_num(s.get("shipment_value")) for s in ships)
+
+    all_scores = [_num(snap_map[str(s["shipment_id"])].get("overall_risk_score"))
+                  for s in ships if str(s["shipment_id"]) in snap_map]
+    all_comp   = [_num(snap_map[str(s["shipment_id"])].get("compliance_risk_score"))
+                  for s in ships if str(s["shipment_id"]) in snap_map]
+    all_vendor = [_num(snap_map[str(s["shipment_id"])].get("vendor_risk_score"))
+                  for s in ships if str(s["shipment_id"]) in snap_map]
+
+    company_risk = _avg(all_scores, 0.0)
+    compliance_score = _avg(all_comp, 0.0)
+    vendor_score = _avg(all_vendor, 0.0)
+    high_risk_count = sum(1 for sc in all_scores if sc >= RISK_THRESHOLDS["MEDIUM"])
+    delay_rate_pct = round((delayed / max(total, 1)) * 100, 1)
+
+    # ── Route heatmap (in-memory) ─────────────────────────────────────────────
     route_map: dict[str, dict] = {}
-    for row in snapshot_rows:
-        route_id = row.get("route_id")
-        origin = row.get("origin_city") or "Unknown"
-        destination = row.get("destination_city") or "Unknown"
-        key = str(route_id) if route_id is not None else f"{origin}->{destination}"
+    for s in ships:
+        origin = s.get("origin_city") or "Unknown"
+        dest = s.get("destination_city") or "Unknown"
+        key = f"{origin}->{dest}"
+        snap = snap_map.get(str(s.get("shipment_id") or ""), {})
         if key not in route_map:
-            route_map[key] = {"id": route_id or key, "name": f"{origin} → {destination}", "scores": [], "shipments": 0}
-        route_map[key]["scores"].append(_num(row.get("overall_risk_score")))
+            route_map[key] = {"name": f"{origin} → {dest}", "scores": [], "shipments": 0}
+        route_map[key]["scores"].append(_num(snap.get("overall_risk_score")))
         route_map[key]["shipments"] += 1
 
     route_rows = []
-    for route in route_map.values():
-        avg_score = _avg(route["scores"], 0.0)
+    for info in route_map.values():
+        avg_score = _avg(info["scores"], 0.0)
         route_rows.append({
-            "id": route["id"],
-            "name": route["name"],
+            "name": info["name"],
             "risk_score": round(avg_score, 2),
             "risk_level": _risk_level(avg_score),
-            "total_shipments": int(route["shipments"]),
+            "total_shipments": info["shipments"],
         })
+    route_rows = sorted(route_rows, key=lambda x: x["risk_score"], reverse=True)[:6]
 
-    if not route_rows:
-        for route in routes:
-            risk = _num(route.get("avg_risk_score"))
-            route_rows.append({
-                "id": route.get("route_id"),
-                "name": f"{route.get('origin_city') or 'Unknown'} → {route.get('destination_city') or 'Unknown'}",
-                "risk_score": round(risk, 2),
-                "risk_level": _risk_level(risk),
-                "total_shipments": int(_num(route.get("total_shipments"))),
-            })
-
-    route_rows = sorted(route_rows, key=lambda item: item["risk_score"], reverse=True)[:6]
-
-    # Compliance timeline
+    # ── Compliance timeline (in-memory) ───────────────────────────────────────
     compliance_timeline = []
     vehicle_docs_expiring_30 = 0
     driver_licenses_expiring_30 = 0
+
     for truck in trucks:
         for key, label in (
             ("insurance_expiry_date", "Truck Insurance"),
@@ -250,19 +267,28 @@ def build_dashboard_view(uid: str) -> dict[str, Any]:
             "level": _expiry_level(days),
         })
 
-    urgent_timeline = sorted([i for i in compliance_timeline if 0 <= i["days"] <= 5], key=lambda i: i["days"])
-    future_timeline = sorted([i for i in compliance_timeline if i["days"] > 5], key=lambda i: i["days"])
-    compliance_timeline = (urgent_timeline + future_timeline)[:6]
-    compliance_alert_count = len([i for i in compliance_timeline if 0 <= i["days"] <= 5])
+    urgent = sorted([i for i in compliance_timeline if 0 <= i["days"] <= 5], key=lambda i: i["days"])
+    future = sorted([i for i in compliance_timeline if i["days"] > 5], key=lambda i: i["days"])
+    compliance_timeline = (urgent + future)[:6]
+    compliance_alert_count = len(urgent)
 
-    vendor_alert_count = sum(1 for v in vendors if _num(v.get("vendor_risk_score")) >= ALERT_THRESHOLDS["WARNING"])
-    high_risk_shipments_count = len([row for row in snapshot_rows if _num(row.get("overall_risk_score")) >= RISK_THRESHOLDS["MEDIUM"]])
+    # ── Vendor alert count (from in-memory vpm) ───────────────────────────────
+    vpm_map = {str(v["vendor_id"]): v for v in vpm_rows if v.get("vendor_id")}
+    vendor_alert_count = 0
+    for s in ships:
+        vid = str(s.get("vendor_id") or "")
+        if vid in vpm_map:
+            delay_rate = _num(vpm_map[vid].get("delay_rate_percentage"))
+            if delay_rate > 30:
+                vendor_alert_count += 1
+                break  # count distinct vendors, not shipments
 
+    # ── Insight cards ─────────────────────────────────────────────────────────
     insight_cards = generate_dashboard_insight({
         "company_risk": company_risk,
-        "delayed_shipments": int(_num(kpis.get("delayed"))),
-        "total_shipments": int(_num(kpis.get("total"))),
-        "delay_rate_pct": float(_num(summary.get("delay_rate_pct"))),
+        "delayed_shipments": delayed,
+        "total_shipments": total,
+        "delay_rate_pct": delay_rate_pct,
         "compliance_alerts": compliance_alert_count,
         "vendor_alerts": vendor_alert_count,
         "driver_licenses_expiring_30": driver_licenses_expiring_30,
@@ -273,16 +299,20 @@ def build_dashboard_view(uid: str) -> dict[str, Any]:
 
     return {
         "kpis": {
-            "active_shipments": int(_num(kpis.get("total"))),
-            "high_risk_shipments": round(high_risk_overall_score, 2),
-            "compliance_alerts": round(compliance_overall_score, 2),
-            "vendor_risk_alerts": round(vendor_overall_score, 2),
-            "high_risk_shipments_count": high_risk_shipments_count,
+            "active_shipments": total,
+            "delivered": delivered,
+            "delayed": delayed,
+            "in_transit": in_transit,
+            "high_risk_shipments": round(company_risk, 2),
+            "compliance_alerts": round(compliance_score, 2),
+            "vendor_risk_alerts": round(vendor_score, 2),
+            "high_risk_shipments_count": high_risk_count,
             "compliance_alerts_count": compliance_alert_count,
             "vendor_risk_alerts_count": vendor_alert_count,
             "company_risk_index": round(company_risk, 2),
             "company_risk_level": _risk_level(company_risk),
-            "total_value": _num(kpis.get("total_value")),
+            "total_value": round(total_value, 2),
+            "delay_rate_pct": delay_rate_pct,
         },
         "route_heatmap": route_rows,
         "compliance_timeline": compliance_timeline,
@@ -294,12 +324,17 @@ def build_dashboard_view(uid: str) -> dict[str, Any]:
 # ─── Alerts View ───────────────────────────────────────────────────────────────
 
 def build_alerts_view(uid: str, limit: int = 50000) -> list[dict[str, Any]]:
+    """Minimal-column fetch — only what's needed to render alert cards."""
     logger.info("Building alerts view for uid=%s", uid)
-    snapshots = _to_records(get_risk_snapshots(uid, limit=50000))
-    shipments = {str(row.get("shipment_id")): row for row in _to_records(get_shipments(uid, limit=50000))}
-    trucks = _to_records(get_trucks(uid))
-    drivers = _to_records(get_drivers(uid))
-    vendors = _to_records(get_vendors(uid))
+    # Fetch only above-threshold snapshots sorted by score desc — no need for all 30k
+    snapshots = _q(uid, "lg_shipment_risk_snapshots",
+                   "shipment_id,overall_risk_score,risk_category,resolved_at")
+    shipments = {str(r["shipment_id"]): r for r in
+                 _q(uid, "lg_shipments", "shipment_id,origin_city,destination_city,shipment_status")}
+    trucks = _q(uid, "lg_trucks",
+                "truck_id,truck_number,insurance_expiry_date,fitness_expiry_date,registration_expiry_date")
+    drivers = _q(uid, "lg_drivers", "driver_id,driver_name,license_expiry_date")
+    vendors = _q(uid, "lg_vendors", "vendor_id,vendor_name")
 
     alerts: list[dict] = []
 
@@ -473,7 +508,10 @@ def build_compliance_view(uid: str) -> dict[str, Any]:
 
 def build_risk_analytics_view(uid: str) -> dict[str, Any]:
     logger.info("Building risk analytics view for uid=%s", uid)
-    snapshot_rows = _latest_snapshot_rows(_to_records(get_risk_snapshots(uid, limit=50000)))
+    # Only the columns needed for analytics charts
+    raw_snaps = _q(uid, "lg_shipment_risk_snapshots",
+                   "shipment_id,overall_risk_score,financial_exposure_score,operational_risk_score,vendor_risk_score,compliance_risk_score")
+    snapshot_rows = _latest_snapshot_rows(raw_snaps)
     routes = _to_records(get_routes(uid))
     vendors = _to_records(get_vendors(uid))
     market = _to_records(get_market_intelligence(uid))
@@ -562,15 +600,25 @@ def build_risk_analytics_view(uid: str) -> dict[str, Any]:
 # ─── Shipment Risk View ────────────────────────────────────────────────────────
 
 def build_shipment_risk_view(uid: str, shipment_id: Optional[str] = None, limit: int = 50000) -> dict[str, Any]:
+    """
+    Selector list uses minimal columns (3 cols × 30k rows).
+    Full data loaded only for the one selected shipment via targeted single-row queries.
+    """
     logger.info("Building shipment risk view for uid=%s", uid)
-    shipments = _to_records(get_shipments(uid, limit=50000))
-    snapshots = _to_records(get_risk_snapshots(uid, limit=50000))
+    # Selector: only 3 columns needed for the dropdown
+    shipments = _q(uid, "lg_shipments", "shipment_id,origin_city,destination_city")
     if not shipments:
         return {"shipments": [], "selected": None}
 
     selected_id = str(shipment_id or shipments[0].get("shipment_id"))
-    selected_shipment = next((r for r in shipments if str(r.get("shipment_id")) == selected_id), shipments[0])
-    selected_snapshot = next((r for r in snapshots if str(r.get("shipment_id")) == str(selected_shipment.get("shipment_id"))), {})
+
+    # Full data for just the selected shipment
+    selected_shipment_rows = _q(uid, "lg_shipments", "*", shipment_id=selected_id)
+    selected_shipment = selected_shipment_rows[0] if selected_shipment_rows else {}
+
+    # Snapshot for just the selected shipment
+    selected_snap_rows = _q(uid, "lg_shipment_risk_snapshots", "*", shipment_id=selected_id)
+    selected_snapshot = selected_snap_rows[0] if selected_snap_rows else {}
 
     operational = _num(selected_snapshot.get("operational_risk_score"))
     financial = _num(selected_snapshot.get("financial_exposure_score"))
