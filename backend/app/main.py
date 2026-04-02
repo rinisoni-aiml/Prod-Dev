@@ -20,6 +20,7 @@ from app.industries.logistics.routers import data as logistics_data
 from app.industries.logistics.routers import views as logistics_views
 from app.industries.logistics.routers import upload as logistics_upload
 from app.industries.logistics.routers import chat as logistics_chat
+from app.industries.logistics.routers import api as logistics_api
 
 app = FastAPI(
     title="PulseIQ API",
@@ -57,6 +58,7 @@ app.include_router(logistics_data.router,   prefix="/api/logistics/data",      t
 app.include_router(logistics_views.router,  prefix="/api/logistics/v1/views",  tags=["Logistics - Views"])
 app.include_router(logistics_upload.router, prefix="/api/logistics/v1/upload", tags=["Logistics - Upload"])
 app.include_router(logistics_chat.router,   prefix="/api/logistics/v1/ai",     tags=["Logistics - AI Chat"])
+app.include_router(logistics_api.router,    prefix="/api/logistics/v1",        tags=["Logistics - API"])
 
 
 @app.get("/")

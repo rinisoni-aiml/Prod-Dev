@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from app.dependencies import get_current_user
 from app.shared.utils.supabase_client import supabase
 from app.industries.logistics.utils.excel_processor import process_file, detect_table_from_filename
+from app.industries.logistics.services.scoring_service import rescore_all_for_user
+from app.industries.logistics.services.insight_engine_service import invalidate_all_insights
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -179,10 +181,24 @@ async def load_sample_data(current_user=Depends(get_current_user)):
     total_inserted = sum(r.get("rows_inserted", 0) for r in results)
     successful = [r for r in results if r.get("success")]
 
+    # Run the proper 13-function scoring engine over all shipments
+    rescore_result = {"success": 0, "failed": 0, "total": 0}
+    try:
+        rescore_result = rescore_all_for_user(uid)
+        invalidate_all_insights(uid)
+        logger.info("Rescored uid=%s: %s", uid, rescore_result)
+    except Exception as score_err:
+        logger.warning("Post-load rescore failed for uid=%s: %s", uid, score_err)
+
     return {
         "success": True,
-        "message": f"Sample data loaded: {len(successful)}/{len(SAMPLE_FILES_ORDER)} files processed, {total_inserted} rows inserted.",
+        "message": (
+            f"Sample data loaded: {len(successful)}/{len(SAMPLE_FILES_ORDER)} files processed, "
+            f"{total_inserted} rows inserted. "
+            f"{rescore_result['success']} shipments rescored."
+        ),
         "results": results,
+        "rescore": rescore_result,
     }
 
 
