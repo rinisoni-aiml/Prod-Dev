@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { LayoutDashboard, Package, AlertTriangle, FileText, Building2, Activity, Sparkles } from 'lucide-react';
+import { useEffect, useState, useCallback } from "react";
+import { LayoutDashboard, Package, AlertTriangle, FileText, Building2, Activity, Sparkles, RefreshCw } from 'lucide-react';
 import { getDashboardView } from "../api/logisticsApi";
 import { formatNumber, formatPercent } from "../utils/logistics";
 
@@ -9,65 +9,37 @@ const riskColorByLevel = {
   low: "#10B981",
 };
 
-const POLL_INTERVAL_MS = 5000;
-const POLL_MAX_ATTEMPTS = 24; // 2 minutes total
-
 export default function DashboardPage() {
   const [state, setState] = useState({
     loading: true,
     error: "",
     payload: null,
   });
-  const [dataReady, setDataReady] = useState(true);
+
+  const loadView = useCallback(async () => {
+    setState(s => ({ ...s, loading: true, error: "" }));
+    try {
+      const response = await getDashboardView();
+      setState({
+        loading: false,
+        error: "",
+        payload: {
+          data: response?.data || {},
+          generatedAt: response?.generated_at || "",
+        },
+      });
+    } catch (error) {
+      setState({
+        loading: false,
+        error: error?.message || "Failed to load dashboard data.",
+        payload: null,
+      });
+    }
+  }, []);
 
   useEffect(() => {
-    let ignore = false;
-    let timer = null;
-    let attempts = 0;
-
-    const loadView = async (isInitial = false) => {
-      if (isInitial) setState(s => ({ ...s, loading: true }));
-      try {
-        const response = await getDashboardView();
-        if (ignore) return;
-
-        const data = response?.data || {};
-        const kpis = data.kpis || {};
-        const routes = data.route_heatmap || [];
-        const isEmpty = routes.length === 0 && Number(kpis.active_shipments || 0) === 0;
-
-        setState({
-          loading: false,
-          error: "",
-          payload: { data, generatedAt: response?.generated_at || "" },
-        });
-
-        if (isEmpty && attempts < POLL_MAX_ATTEMPTS) {
-          setDataReady(false);
-          attempts += 1;
-          timer = setTimeout(() => loadView(false), POLL_INTERVAL_MS);
-        } else {
-          setDataReady(true);
-        }
-      } catch (error) {
-        if (!ignore) {
-          setState({
-            loading: false,
-            error: error?.message || "Failed to load dashboard data.",
-            payload: null,
-          });
-          setDataReady(true);
-        }
-      }
-    };
-
-    loadView(true);
-
-    return () => {
-      ignore = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
+    loadView();
+  }, [loadView]);
 
   if (state.loading) {
     return (
@@ -126,13 +98,6 @@ export default function DashboardPage() {
           Overview of shipments, risk trends, and insights
         </p>
       </div>
-
-      {!dataReady && (
-        <div className="mb-4 flex items-center gap-3 bg-primary/10 border border-primary/30 rounded-lg px-4 py-3 text-sm text-primary">
-          <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin flex-shrink-0" />
-          Sample data is loading in the background — this page refreshes automatically every 5 seconds.
-        </div>
-      )}
 
       <div className="grid grid-cols-5 gap-4 mb-4">
         <div className="bg-card border border-border rounded-lg p-4">
@@ -206,8 +171,14 @@ export default function DashboardPage() {
               })}
             </div>
           ) : (
-            <div className="text-center py-12 text-muted-foreground">
-              No route intelligence available yet.
+            <div className="flex flex-col items-center gap-3 py-12">
+              <div className="text-muted-foreground text-sm">No route intelligence available yet.</div>
+              <button
+                onClick={loadView}
+                className="flex items-center gap-2 text-xs text-primary border border-primary/30 px-3 py-1.5 rounded-lg hover:bg-primary/10 transition-colors"
+              >
+                <RefreshCw className="h-3.5 w-3.5" /> Refresh
+              </button>
             </div>
           )}
         </div>
