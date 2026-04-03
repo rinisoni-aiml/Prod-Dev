@@ -7,7 +7,7 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Query
 from app.dependencies import get_current_user
 from app.shared.utils.supabase_client import supabase
 from app.industries.logistics.utils.excel_processor import process_file, detect_table_from_filename
@@ -94,39 +94,11 @@ async def upload_file(
     }
 
 
-@router.post("/sample")
-async def load_sample_data(current_user=Depends(get_current_user)):
-    """
-    Load the bundled sample logistics dataset for the current user.
-    Idempotent — if sample files are already loaded, returns the existing records
-    without re-processing (avoids duplicating rows in lg_* tables).
-    Also writes data_files records so files appear in the Data Upload page.
-    """
-    uid = str(current_user.id)
-
-    if not SAMPLE_DATA_DIR.exists():
-        raise HTTPException(status_code=500, detail=f"Sample dataset directory not found: {SAMPLE_DATA_DIR}")
-
-    # Idempotency check — if sample records already exist for this user, return early
-    try:
-        all_records = supabase.table("data_files").select("*").eq("user_id", uid).execute().data or []
-        sample_records = [f for f in all_records if (f.get("column_mapping") or {}).get("__sample__")]
-        if sample_records:
-            total = sum(r.get("row_count") or 0 for r in sample_records)
-            return {
-                "success": True,
-                "message": f"Sample data already loaded ({len(sample_records)} files, {total} rows).",
-                "results": [
-                    {"file": r["file_name"], "table": (r.get("column_mapping") or {}).get("__table__"),
-                     "rows_inserted": r.get("row_count") or 0, "success": True}
-                    for r in sample_records
-                ],
-            }
-    except Exception:
-        pass
-
+def _load_sample_files_background(uid: str) -> None:
+    """Background worker: process all sample Excel files and write them into lg_* tables."""
     results = []
     _meta_records: list[dict] = []
+
     for filename in SAMPLE_FILES_ORDER:
         filepath = SAMPLE_DATA_DIR / filename
         if not filepath.exists():
@@ -134,13 +106,7 @@ async def load_sample_data(current_user=Depends(get_current_user)):
             continue
         try:
             content = filepath.read_bytes()
-            # Limit to 500 rows per file — enough for a rich demo, avoids processing
-            # tens-of-thousands of rows. skip_auto_risk because shipment_risk_snapshots.xlsx
-            # is loaded separately and would overwrite auto-computed snapshots anyway.
-            result = process_file(
-                content, filename, uid, supabase,
-                skip_auto_risk=True,
-            )
+            result = process_file(content, filename, uid, supabase, skip_auto_risk=True)
             rows_inserted = result.get("rows_inserted", 0)
             table_name = result.get("table")
             results.append({
@@ -150,8 +116,6 @@ async def load_sample_data(current_user=Depends(get_current_user)):
                 "success": result.get("success", False),
                 "error": result.get("error"),
             })
-
-            # Collect metadata for a single batch upsert at the end
             if result.get("success"):
                 _meta_records.append({
                     "user_id": uid,
@@ -165,11 +129,10 @@ async def load_sample_data(current_user=Depends(get_current_user)):
                         "__sample__": True,
                     },
                 })
-
         except Exception as e:
+            logger.error("Sample load failed for %s (user %s): %s", filename, uid, e)
             results.append({"file": filename, "success": False, "error": str(e)})
 
-    # Single batch upsert for all data_files metadata (replaces 24 individual round trips)
     if _meta_records:
         try:
             supabase.table("data_files").upsert(
@@ -178,23 +141,54 @@ async def load_sample_data(current_user=Depends(get_current_user)):
         except Exception as meta_err:
             logger.warning("Could not batch-write data_files records: %s", meta_err)
 
-    total_inserted = sum(r.get("rows_inserted", 0) for r in results)
-    successful = [r for r in results if r.get("success")]
-
-    # shipment_risk_snapshots.xlsx is already loaded above with pre-computed scores —
-    # no need to rescore here. Invalidate the insight cache so stale entries are cleared.
     try:
         invalidate_all_insights(uid)
     except Exception:
         pass
 
+    total_inserted = sum(r.get("rows_inserted", 0) for r in results)
+    logger.info(
+        "Sample data background load complete for user %s: %d rows across %d files",
+        uid, total_inserted, len([r for r in results if r.get("success")])
+    )
+
+
+@router.post("/sample")
+async def load_sample_data(
+    background_tasks: BackgroundTasks,
+    current_user=Depends(get_current_user),
+):
+    """
+    Start loading the bundled sample logistics dataset for the current user.
+    Returns immediately — file processing runs in the background.
+    Idempotent: if sample files are already loaded, returns early without re-processing.
+    """
+    uid = str(current_user.id)
+
+    if not SAMPLE_DATA_DIR.exists():
+        raise HTTPException(status_code=500, detail=f"Sample dataset directory not found: {SAMPLE_DATA_DIR}")
+
+    # Idempotency check — fast single query; skip background work if already loaded
+    try:
+        all_records = supabase.table("data_files").select("id,file_name,row_count,column_mapping").eq("user_id", uid).execute().data or []
+        sample_records = [f for f in all_records if (f.get("column_mapping") or {}).get("__sample__")]
+        if sample_records:
+            total = sum(r.get("row_count") or 0 for r in sample_records)
+            return {
+                "success": True,
+                "status": "ready",
+                "message": f"Sample data already loaded ({len(sample_records)} files, {total} rows).",
+            }
+    except Exception:
+        pass
+
+    # Kick off processing in the background — returns to caller immediately
+    background_tasks.add_task(_load_sample_files_background, uid)
+
     return {
         "success": True,
-        "message": (
-            f"Sample data loaded: {len(successful)}/{len(SAMPLE_FILES_ORDER)} files processed, "
-            f"{total_inserted} rows inserted."
-        ),
-        "results": results,
+        "status": "loading",
+        "message": "Sample data is loading in the background. Your dashboard will populate shortly.",
     }
 
 
