@@ -1,6 +1,4 @@
-import asyncio
 import logging
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,35 +26,10 @@ from app.industries.logistics.routers import upload as logistics_upload
 from app.industries.logistics.routers import chat as logistics_chat
 from app.industries.logistics.routers import api as logistics_api
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # On startup: seed logistics sample cache in the background if not done yet
-    async def _seed_logistics_cache():
-        try:
-            from app.industries.logistics.routers.upload import (
-                _system_cache_populated,
-                _load_sample_files_for_user,
-                SYS_SAMPLE_UID,
-            )
-            if not _system_cache_populated():
-                logger.info("Logistics sample cache not seeded — starting background seed...")
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, _load_sample_files_for_user, SYS_SAMPLE_UID)
-                logger.info("Logistics sample cache seeded successfully.")
-            else:
-                logger.info("Logistics sample cache already seeded — skipping.")
-        except Exception as exc:
-            logger.warning("Logistics sample cache seed failed (non-fatal): %s", exc)
-
-    asyncio.create_task(_seed_logistics_cache())
-    yield
-
-
 app = FastAPI(
     title="PulseIQ API",
     version="1.0.0",
     description="Multi-industry intelligence platform API — FMCG, Healthcare, Logistics and more.",
-    lifespan=lifespan,
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────

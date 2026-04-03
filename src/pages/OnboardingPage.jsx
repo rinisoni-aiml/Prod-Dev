@@ -114,13 +114,8 @@ const OnboardingPage = () => {
             .map(f => uploadDataFile(user.id, f.file, f.mapping, f.previewRows.length))
         );
       } else if (uploadMode === 'sample') {
-        // Fire the sample-data loader — backend returns immediately (background processing).
-        // Do NOT await the full insert: navigate to dashboard straight after the response.
         if (industry === 'logistics') {
-          const result = await logisticsDataApi.loadSampleData();
-          if (result?.data?.status === 'loading') {
-            toast('Sample data is loading in the background — your dashboard will populate in ~30 seconds.', { icon: 'ℹ️', duration: 6000 });
-          }
+          await logisticsDataApi.loadSampleData();
         } else {
           await dataApi.loadSampleData();
         }

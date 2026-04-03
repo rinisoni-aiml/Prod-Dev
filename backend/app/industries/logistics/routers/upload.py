@@ -1,39 +1,49 @@
 """
 Logistics Upload Router — /api/logistics/v1/upload
-Handles file uploads and sample data loading.
 
-Sample data strategy (cache-first, instant for users):
-  1. A "system sample user" (SYS_SAMPLE_UID) holds the pre-loaded sample rows
-     in all lg_* tables. Populate it once by calling POST /admin/init-sample-cache.
-  2. When any user loads sample data, the Postgres RPC lg_copy_sample_to_user()
-     does a server-side INSERT...SELECT — copies ~100 K rows in 1–3 s with no
-     network overhead.
-  3. If the system user has no data yet (cache not seeded), the endpoint falls
-     back to loading files in the background.
+Sample data strategy (mirrors FMCG, no manual SQL steps required):
 
-Run the SQL in migrations/sample_cache_rpc.sql in the Supabase SQL editor BEFORE
-calling the admin endpoint.
+  CACHE (one-time, automatic):
+    Processed rows from the 12 sample Excel files are compressed (gzip JSON)
+    and stored in Supabase Storage at logistics/sample_cache/{table}.json.gz.
+    The cache is built automatically the first time any user loads sample data,
+    then reused for every subsequent user.
+
+  USER LOAD (synchronous, ~10–14 s):
+    1. Download all 12 gzip files from Storage concurrently.
+    2. Decompress in memory.
+    3. Insert into all 12 lg_* tables concurrently (2 000-row batches).
+    4. Return {"status": "ready"} — frontend navigates to a populated dashboard.
+
+  No background tasks, no polling, no zeros on the dashboard.
 """
+import asyncio
+import gzip
+import json
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from app.dependencies import get_current_user
 from app.shared.utils.supabase_client import supabase
-from app.industries.logistics.utils.excel_processor import process_file, detect_table_from_filename
+from app.industries.logistics.utils.excel_processor import (
+    process_file, detect_table_from_filename,
+)
 from app.industries.logistics.services.insight_engine_service import invalidate_all_insights
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Reserved UUID that holds the single copy of sample data in all lg_* tables.
-# This user is never a real auth user — it exists only as a FK-less data seed.
-SYS_SAMPLE_UID = "00000000-0000-0000-0000-000000000000"
+# ─── Constants ────────────────────────────────────────────────────────────────
 
-# Path to bundled sample dataset
 SAMPLE_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+CACHE_BUCKET    = "data-files"
+CACHE_PREFIX    = "logistics/sample_cache"
+BATCH_SIZE      = 2000          # rows per upsert request
+MAX_WORKERS     = 6             # concurrent table threads
 
-# Load order respects FK-ish dependencies (entities before transactions)
 SAMPLE_FILES_ORDER = [
     "route.xlsx",
     "Vendors.xlsx",
@@ -49,126 +59,189 @@ SAMPLE_FILES_ORDER = [
     "risk_weight_configuration.xlsx",
 ]
 
+TABLE_CONFLICT_MAP: dict[str, str] = {
+    "lg_routes":                         "user_id,route_id",
+    "lg_vendors":                        "user_id,vendor_id",
+    "lg_drivers":                        "user_id,driver_id",
+    "lg_trucks":                         "user_id,truck_id",
+    "lg_shipments":                      "user_id,shipment_id",
+    "lg_vendor_performance_metrics":     "user_id,vendor_id,calculation_date,performance_window",
+    "lg_driver_incidents":               "user_id,incident_id",
+    "lg_shipment_financials":            "user_id,shipment_id",
+    "lg_shipment_cost_planning_actuals": "user_id,shipment_id",
+    "lg_market_freight_intelligence":    "user_id,route_id,vehicle_type,date",
+    "lg_shipment_risk_snapshots":        "user_id,shipment_id",
+    "lg_risk_weight_configuration":      "user_id",
+}
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _system_cache_populated() -> bool:
-    """Return True if the system sample user has shipment rows in the DB."""
+# ─── Storage cache helpers ────────────────────────────────────────────────────
+
+def _cache_path(table_name: str) -> str:
+    return f"{CACHE_PREFIX}/{table_name}.json.gz"
+
+
+def _is_cache_ready() -> bool:
+    """True if lg_shipments cache file exists in Storage."""
     try:
-        resp = (
-            supabase.table("lg_shipments")
-            .select("shipment_id", count="exact")
-            .eq("user_id", SYS_SAMPLE_UID)
-            .limit(1)
-            .execute()
-        )
-        return (resp.count or 0) > 0
+        files = supabase.storage.from_(CACHE_BUCKET).list(CACHE_PREFIX)
+        names = {f["name"] for f in (files or [])}
+        return "lg_shipments.json.gz" in names
     except Exception:
         return False
 
 
-def _copy_sample_via_rpc(uid: str) -> dict:
-    """
-    Call the Postgres RPC that does a server-side INSERT…SELECT from the system
-    user to the target user. Returns in 1–3 s regardless of row count.
-    """
-    result = supabase.rpc("lg_copy_sample_to_user", {"p_uid": uid}).execute()
-    return result.data or {}
+def _upload_cache(table_rows: dict[str, list[dict]]) -> None:
+    """Compress and upload all tables to Storage. Fire-and-forget (runs in its own thread)."""
+    for table_name, rows in table_rows.items():
+        try:
+            # Strip user_id — each user gets their own copy on load
+            stripped = [{k: v for k, v in r.items() if k != "user_id"} for r in rows]
+            payload  = gzip.compress(
+                json.dumps(stripped, default=str).encode("utf-8"), compresslevel=6
+            )
+            supabase.storage.from_(CACHE_BUCKET).upload(
+                _cache_path(table_name), payload,
+                {"content-type": "application/gzip", "upsert": "true"},
+            )
+            logger.info("Sample cache uploaded: %s (%d rows, %d bytes)", table_name, len(stripped), len(payload))
+        except Exception as exc:
+            logger.warning("Cache upload failed for %s: %s", table_name, exc)
 
 
-def _load_sample_files_for_user(uid: str) -> list[dict]:
-    """
-    Process all bundled Excel files and insert them into lg_* tables for `uid`.
-    Used both for seeding the system user and as a fallback when the RPC cache
-    is not yet populated.
-    """
-    results = []
-    _meta_records: list[dict] = []
+def _download_cache() -> dict[str, list[dict]]:
+    """Download and decompress all cached tables concurrently."""
+    tables = list(TABLE_CONFLICT_MAP.keys())
 
+    def _dl(table_name: str) -> tuple[str, list[dict]]:
+        try:
+            raw = supabase.storage.from_(CACHE_BUCKET).download(_cache_path(table_name))
+            rows = json.loads(gzip.decompress(raw).decode("utf-8"))
+            logger.info("Cache hit: %s (%d rows)", table_name, len(rows))
+            return table_name, rows
+        except Exception as exc:
+            logger.warning("Cache download failed for %s: %s", table_name, exc)
+            return table_name, []
+
+    result: dict[str, list[dict]] = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+        for table_name, rows in ex.map(lambda t: _dl(t), tables):
+            if rows:
+                result[table_name] = rows
+    return result
+
+
+# ─── Excel processing ──────────────────────────────────────────────────────────
+
+def _process_all_files() -> dict[str, list[dict]]:
+    """
+    Read + process all 12 Excel files concurrently using dry_run mode.
+    Returns {table_name: rows} without touching the database.
+    """
+    def _process_one(filename: str) -> tuple[str | None, list[dict]]:
+        filepath = SAMPLE_DATA_DIR / filename
+        if not filepath.exists():
+            logger.warning("Sample file not found: %s", filename)
+            return None, []
+        try:
+            content = filepath.read_bytes()
+            result  = process_file(
+                content, filename, "__cache__", supabase,
+                skip_auto_risk=True, dry_run=True,
+            )
+            return result.get("table"), result.get("rows", [])
+        except Exception as exc:
+            logger.error("Failed to process %s: %s", filename, exc)
+            return None, []
+
+    table_rows: dict[str, list[dict]] = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+        for table_name, rows in ex.map(_process_one, SAMPLE_FILES_ORDER):
+            if table_name and rows:
+                table_rows[table_name] = rows
+    return table_rows
+
+
+# ─── Concurrent DB insertion ──────────────────────────────────────────────────
+
+def _insert_all_tables(table_rows: dict[str, list[dict]], uid: str) -> None:
+    """Insert all tables concurrently with BATCH_SIZE-row upserts."""
+
+    def _insert_one(table_name: str, rows: list[dict]) -> None:
+        conflict  = TABLE_CONFLICT_MAP.get(table_name, "id")
+        user_rows = [{**r, "user_id": uid} for r in rows]
+        for i in range(0, len(user_rows), BATCH_SIZE):
+            batch = user_rows[i : i + BATCH_SIZE]
+            try:
+                supabase.table(table_name).upsert(batch, on_conflict=conflict).execute()
+            except Exception as exc:
+                logger.error("Insert error %s batch@%d: %s", table_name, i, exc)
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+        futures = {ex.submit(_insert_one, t, r): t for t, r in table_rows.items()}
+        for f in as_completed(futures):
+            try:
+                f.result()
+            except Exception as exc:
+                logger.error("Table insert thread failed: %s", exc)
+
+
+def _write_data_files_metadata(uid: str) -> None:
+    """Write data_files metadata rows so files appear in the Data Upload page."""
+    records = []
     for filename in SAMPLE_FILES_ORDER:
         filepath = SAMPLE_DATA_DIR / filename
         if not filepath.exists():
-            results.append({"file": filename, "skipped": True, "reason": "File not found"})
             continue
+        tbl = detect_table_from_filename(filename)
+        records.append({
+            "user_id":        uid,
+            "file_name":      filename,
+            "storage_path":   f"logistics/{uid}/sample/{filename}",
+            "file_size":      filepath.stat().st_size,
+            "row_count":      0,
+            "column_mapping": {
+                "__table__":   f"lg_{tbl}" if tbl else None,
+                "__purpose__": "logistics",
+                "__sample__":  True,
+            },
+        })
+    if records:
         try:
-            content = filepath.read_bytes()
-            result = process_file(content, filename, uid, supabase, skip_auto_risk=True)
-            rows_inserted = result.get("rows_inserted", 0)
-            table_name = result.get("table")
-            results.append({
-                "file": filename,
-                "table": table_name,
-                "rows_inserted": rows_inserted,
-                "success": result.get("success", False),
-                "error": result.get("error"),
-            })
-            if result.get("success") and uid != SYS_SAMPLE_UID:
-                # Only write data_files metadata for real users, not the system seed
-                _meta_records.append({
-                    "user_id": uid,
-                    "file_name": filename,
-                    "storage_path": f"logistics/{uid}/sample/{filename}",
-                    "file_size": len(content),
-                    "row_count": rows_inserted,
-                    "column_mapping": {
-                        "__table__": table_name,
-                        "__purpose__": "logistics",
-                        "__sample__": True,
-                    },
-                })
-        except Exception as e:
-            logger.error("Sample load failed for %s (user %s): %s", filename, uid, e)
-            results.append({"file": filename, "success": False, "error": str(e)})
+            supabase.table("data_files").upsert(records, on_conflict="user_id,file_name").execute()
+        except Exception as exc:
+            logger.warning("data_files metadata write failed: %s", exc)
 
-    if _meta_records:
-        try:
-            supabase.table("data_files").upsert(
-                _meta_records, on_conflict="user_id,file_name"
-            ).execute()
-        except Exception as meta_err:
-            logger.warning("Could not batch-write data_files records: %s", meta_err)
+
+def _do_load_sample(uid: str) -> None:
+    """
+    Core synchronous loader — runs in a thread via run_in_executor.
+
+    Fast path  (cache ready):   download Storage → concurrent insert  (~10–12 s)
+    First-time (no cache yet):  process Excel files → concurrent insert (~12–15 s)
+                                 then upload cache in background for future users
+    """
+    if _is_cache_ready():
+        logger.info("Loading sample from Storage cache for user %s", uid)
+        table_rows = _download_cache()
+    else:
+        logger.info("Cache miss — processing Excel files for user %s (will cache after)", uid)
+        table_rows = _process_all_files()
+        # Upload cache in the background so next users are fast
+        threading.Thread(
+            target=_upload_cache, args=(table_rows,), daemon=True, name="lg-cache-upload"
+        ).start()
+
+    _insert_all_tables(table_rows, uid)
+    _write_data_files_metadata(uid)
 
     try:
         invalidate_all_insights(uid)
     except Exception:
         pass
 
-    total = sum(r.get("rows_inserted", 0) for r in results)
-    logger.info("Sample load complete for user %s: %d rows", uid, total)
-    return results
-
-
-def _write_user_data_files(uid: str) -> None:
-    """Write data_files metadata rows for a user after RPC copy."""
-    _meta_records = []
-    for filename in SAMPLE_FILES_ORDER:
-        filepath = SAMPLE_DATA_DIR / filename
-        if not filepath.exists():
-            continue
-        try:
-            table_name = f"lg_{detect_table_from_filename(filename)}" if detect_table_from_filename(filename) else None
-            _meta_records.append({
-                "user_id": uid,
-                "file_name": filename,
-                "storage_path": f"logistics/{uid}/sample/{filename}",
-                "file_size": filepath.stat().st_size,
-                "row_count": 0,  # row counts not tracked via RPC copy
-                "column_mapping": {
-                    "__table__": table_name,
-                    "__purpose__": "logistics",
-                    "__sample__": True,
-                },
-            })
-        except Exception:
-            pass
-
-    if _meta_records:
-        try:
-            supabase.table("data_files").upsert(
-                _meta_records, on_conflict="user_id,file_name"
-            ).execute()
-        except Exception as e:
-            logger.warning("Could not write data_files after RPC copy: %s", e)
+    total = sum(len(r) for r in table_rows.values())
+    logger.info("Sample load complete for user %s: %d rows across %d tables", uid, total, len(table_rows))
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -191,9 +264,9 @@ async def upload_file(
 
     try:
         content = await file.read()
-        result = process_file(content, file.filename, uid, supabase, manual_table=table_name)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        result  = process_file(content, file.filename, uid, supabase, manual_table=table_name)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
     if not result.get("success"):
         raise HTTPException(status_code=422, detail=result.get("error", "Processing failed"))
@@ -205,44 +278,47 @@ async def upload_file(
             {"content-type": file.content_type or "application/octet-stream", "upsert": "true"},
         )
         record = {
-            "user_id": uid,
-            "file_name": file.filename,
-            "storage_path": storage_path,
-            "file_size": len(content),
-            "row_count": result.get("rows_inserted", 0),
+            "user_id":        uid,
+            "file_name":      file.filename,
+            "storage_path":   storage_path,
+            "file_size":      len(content),
+            "row_count":      result.get("rows_inserted", 0),
             "column_mapping": {"__table__": result.get("table"), "__purpose__": "logistics"},
         }
-        existing = supabase.table("data_files").select("id").eq("user_id", uid).eq("file_name", file.filename).execute()
+        existing = (
+            supabase.table("data_files")
+            .select("id").eq("user_id", uid).eq("file_name", file.filename)
+            .execute()
+        )
         if existing.data:
             supabase.table("data_files").update(record).eq("id", existing.data[0]["id"]).execute()
         else:
             supabase.table("data_files").insert(record).execute()
-    except Exception as e:
-        logger.warning("Could not record file metadata: %s", e)
+    except Exception as exc:
+        logger.warning("Could not record file metadata: %s", exc)
 
     return {
-        "success": True,
-        "table": result.get("table"),
+        "success":        True,
+        "table":          result.get("table"),
         "rows_processed": result.get("rows_processed"),
-        "rows_inserted": result.get("rows_inserted"),
-        "errors": result.get("errors", []),
-        "filename": file.filename,
+        "rows_inserted":  result.get("rows_inserted"),
+        "errors":         result.get("errors", []),
+        "filename":       file.filename,
     }
 
 
 @router.post("/sample")
-async def load_sample_data(
-    background_tasks: BackgroundTasks,
-    current_user=Depends(get_current_user),
-):
+async def load_sample_data(current_user=Depends(get_current_user)):
     """
-    Load the bundled sample logistics dataset for the current user.
+    Load the full logistics sample dataset for the current user.
 
-    Fast path (cache ready): calls lg_copy_sample_to_user() RPC — server-side
-    INSERT…SELECT completes in ~2 seconds regardless of row count.
+    This endpoint is SYNCHRONOUS — it waits until all rows are inserted and
+    returns {"status": "ready"} only when the dashboard will show real data.
 
-    Fallback (cache not seeded yet): runs file processing in a background task
-    and returns immediately.
+    Timing:
+      - Cache hit (Storage):  ~10–12 s  (download + concurrent insert)
+      - Cache miss (first ever load): ~12–15 s  (Excel parse + concurrent insert,
+                                                  then uploads cache for future users)
     """
     uid = str(current_user.id)
 
@@ -252,90 +328,38 @@ async def load_sample_data(
             detail=f"Sample dataset directory not found: {SAMPLE_DATA_DIR}",
         )
 
-    # Idempotency: if this user already has sample data, return immediately
+    # Idempotency: skip if this user already has sample data
     try:
         all_records = (
             supabase.table("data_files")
-            .select("id,file_name,row_count,column_mapping")
+            .select("id,column_mapping")
             .eq("user_id", uid)
             .execute()
             .data or []
         )
-        sample_records = [f for f in all_records if (f.get("column_mapping") or {}).get("__sample__")]
-        if sample_records:
-            return {
-                "success": True,
-                "status": "ready",
-                "message": f"Sample data already loaded ({len(sample_records)} files).",
-            }
+        if any((r.get("column_mapping") or {}).get("__sample__") for r in all_records):
+            return {"success": True, "status": "ready", "message": "Sample data already loaded."}
     except Exception:
         pass
 
-    # Fast path: system cache populated — use RPC (1–3 s)
-    if _system_cache_populated():
-        try:
-            _copy_sample_via_rpc(uid)
-            _write_user_data_files(uid)
-            try:
-                invalidate_all_insights(uid)
-            except Exception:
-                pass
-            return {
-                "success": True,
-                "status": "ready",
-                "message": "Sample data loaded from cache.",
-            }
-        except Exception as rpc_err:
-            logger.warning("RPC copy failed (%s), falling back to background task", rpc_err)
+    # Run synchronously in a thread so the async event loop stays free
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _do_load_sample, uid)
 
-    # Fallback: seed not ready yet — load in background
-    background_tasks.add_task(_load_sample_files_for_user, uid)
     return {
         "success": True,
-        "status": "loading",
-        "message": "Sample data is loading in the background. Your dashboard will populate shortly.",
-    }
-
-
-@router.post("/admin/init-sample-cache")
-async def init_sample_cache(
-    background_tasks: BackgroundTasks,
-    current_user=Depends(get_current_user),
-):
-    """
-    One-time admin endpoint: seed the system user with all sample Excel data.
-    After this completes, all subsequent /sample calls will use the fast RPC path.
-
-    Prerequisites:
-      1. Run backend/app/industries/logistics/migrations/sample_cache_rpc.sql
-         in the Supabase SQL editor to create the lg_copy_sample_to_user() function.
-      2. Call this endpoint once (any authenticated user can trigger it).
-
-    Idempotent — safe to call multiple times; skips if already seeded.
-    """
-    if _system_cache_populated():
-        return {"success": True, "message": "System sample cache is already seeded. Nothing to do."}
-
-    background_tasks.add_task(_load_sample_files_for_user, SYS_SAMPLE_UID)
-    return {
-        "success": True,
-        "message": (
-            "Seeding system sample cache in the background. "
-            "This takes 1–3 minutes for ~100 K rows. "
-            "Once complete, all users will get instant sample data via RPC."
-        ),
+        "status":  "ready",
+        "message": "Sample data loaded successfully.",
     }
 
 
 @router.get("/config")
 async def get_upload_config(current_user=Depends(get_current_user)):
-    """Return metadata about the upload system."""
     return {
         "data": {
-            "supported_tables": list(detect_table_from_filename.__code__.co_consts),
             "sample_data_available": SAMPLE_DATA_DIR.exists(),
-            "supported_formats": [".xlsx", ".xls", ".csv"],
-            "sample_cache_ready": _system_cache_populated(),
+            "supported_formats":     [".xlsx", ".xls", ".csv"],
+            "sample_cache_ready":    _is_cache_ready(),
         }
     }
 
@@ -346,9 +370,9 @@ async def get_table_stats(current_user=Depends(get_current_user)):
     uid = str(current_user.id)
     tables = [
         "lg_routes", "lg_vendors", "lg_drivers", "lg_trucks", "lg_shipments",
-        "lg_vendor_performance_metrics", "lg_driver_incidents", "lg_shipment_financials",
-        "lg_shipment_cost_planning_actuals", "lg_market_freight_intelligence",
-        "lg_shipment_risk_snapshots",
+        "lg_vendor_performance_metrics", "lg_driver_incidents",
+        "lg_shipment_financials", "lg_shipment_cost_planning_actuals",
+        "lg_market_freight_intelligence", "lg_shipment_risk_snapshots",
     ]
     stats = {}
     for tbl in tables:

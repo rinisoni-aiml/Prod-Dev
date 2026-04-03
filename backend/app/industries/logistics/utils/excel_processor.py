@@ -362,6 +362,7 @@ def process_file(
     manual_table: str | None = None,
     max_rows: int | None = None,
     skip_auto_risk: bool = False,
+    dry_run: bool = False,
 ) -> dict:
     """
     Process an uploaded Excel/CSV file and insert rows into the matching lg_* Supabase table.
@@ -398,6 +399,18 @@ def process_file(
     # Build all rows at once using vectorised pandas — much faster than iterrows
     rows = _build_rows_vectorized(df, col_map, uid)
     rows_processed = len(rows)
+
+    # dry_run: return processed rows without touching the database
+    if dry_run:
+        return {
+            "success": True,
+            "table": f"lg_{table}",
+            "rows_processed": rows_processed,
+            "rows_inserted": 0,
+            "rows": rows,
+            "errors": [],
+        }
+
     rows_inserted = 0
     errors: list[str] = []
 
