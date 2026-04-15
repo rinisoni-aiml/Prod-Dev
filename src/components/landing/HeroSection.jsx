@@ -146,25 +146,6 @@ const HeroSection = () => {
       ══════════════════════════════════════════ */}
       <div className="relative z-10 max-w-5xl mx-auto px-4 text-center">
 
-        {/* ── Badge ── */}
-        <motion.div
-          initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.5 }}
-          className="relative inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full mb-7 overflow-hidden"
-          style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.28)' }}>
-          <motion.div
-            animate={{ rotate: [0, 12, -12, 0], scale: [1, 1.15, 1] }}
-            transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}>
-            <Brain className="h-4 w-4 text-primary" />
-          </motion.div>
-          <span className="text-sm font-semibold text-foreground">AI Business Intelligence Co-Pilot</span>
-          <span style={{ color: 'rgba(59,130,246,0.4)' }}>·</span>
-          <motion.span className="text-xs text-foreground-secondary"
-            animate={{ opacity: [0.55, 1, 0.55] }} transition={{ duration: 2.2, repeat: Infinity }}>
-            6 Industries · Now Live
-          </motion.span>
-          <span className="shimmer absolute inset-0 rounded-full" />
-        </motion.div>
-
         {/* ── Data flow strip ── */}
         <motion.div
           initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3, duration: 0.6 }}
@@ -217,7 +198,7 @@ const HeroSection = () => {
         {/* ── Main heading with cycling industry word ── */}
         <motion.h1
           initial={{ opacity: 0, y: 35 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.42, duration: 0.6 }}
-          className="text-4xl sm:text-5xl md:text-7xl font-bold tracking-tight mb-4 leading-tight">
+          className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-4 leading-tight">
           Turn Your{' '}
           {/* Cycling word wrapper — fixed height prevents layout jump */}
           <span className="inline-block relative" style={{ verticalAlign: 'bottom' }}>
@@ -270,7 +251,7 @@ const HeroSection = () => {
         {/* ── Subtitle ── */}
         <motion.p
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.68, duration: 0.55 }}
-          className="text-lg md:text-xl text-foreground-secondary max-w-[680px] mx-auto mb-10">
+          className="text-base md:text-lg text-foreground-secondary max-w-[680px] mx-auto mb-10">
           An AI-powered enterprise platform that connects to your CRM, ERP, documents, emails, and internal systems — and transforms them into actionable, explainable business insights.
         </motion.p>
 
@@ -279,22 +260,15 @@ const HeroSection = () => {
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.78, duration: 0.5 }}
           className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
           <Link to="/signup"
-            className="gradient-brand text-primary-foreground px-8 py-3.5 rounded-xl text-base font-semibold hover-lift flex items-center gap-2 shadow-lg">
-            Request Early Access <ArrowRight className="h-5 w-5" />
+            className="gradient-brand text-primary-foreground px-6 py-2.5 rounded-xl text-sm font-semibold hover-lift flex items-center gap-2 shadow-lg">
+            Request Early Access <ArrowRight className="h-4 w-4" />
           </Link>
           <a href="#process"
-            className="border border-border bg-background-surface/50 px-8 py-3.5 rounded-xl text-base font-medium text-foreground hover-lift">
+            className="border border-border bg-background-surface/50 px-6 py-2.5 rounded-xl text-sm font-medium text-foreground hover-lift">
             Schedule a Demo
           </a>
         </motion.div>
 
-        {/* ── Trust line ── */}
-        <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.9 }}
-          className="flex items-center justify-center gap-4 text-sm text-foreground-secondary mb-10">
-          <Shield className="h-4 w-4 text-success" />
-          <span>Enterprise-grade security · No data shared externally · Deploy in days</span>
-        </motion.div>
 
         {/* ── Live metrics strip ── */}
         <motion.div

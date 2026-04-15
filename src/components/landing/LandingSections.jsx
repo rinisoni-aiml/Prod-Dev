@@ -316,7 +316,7 @@ function IndustriesSection() {
 
   const industries = [
     { icon: Factory, name: 'FMCG', desc: 'Demand forecasting & inventory intelligence', live: true, tags: ['Demand', 'Inventory', 'Forecasting'], rgb: '59, 130, 246', textColor: 'hsl(217, 91%, 60%)' },
-    { icon: GraduationCap, name: 'Education', desc: 'Student analytics & retention', live: false, tags: ['Analytics', 'Retention', 'Performance'], rgb: '139, 92, 246', textColor: 'hsl(263, 70%, 58%)' },
+    { icon: GraduationCap, name: 'Education', desc: 'Student analytics & retention', live: true, tags: ['Analytics', 'Retention', 'Performance'], rgb: '139, 92, 246', textColor: 'hsl(263, 70%, 58%)' },
     { icon: Activity, name: 'Healthcare', desc: 'Patient risk & ops analysis', live: false, tags: ['Risk Analysis', 'Patient Ops', 'Monitoring'], rgb: '16, 185, 129', textColor: 'hsl(160, 84%, 39%)' },
     { icon: Building2, name: 'Real Estate', desc: 'Lead scoring & deal intelligence', live: false, tags: ['Lead Scoring', 'Deals', 'Market Intel'], rgb: '245, 158, 11', textColor: 'hsl(38, 92%, 50%)' },
     { icon: Truck, name: 'Logistics', desc: 'Delivery & efficiency insights', live: true, tags: ['Delivery', 'Efficiency', 'Routes'], rgb: '6, 182, 212', textColor: 'hsl(187, 96%, 42%)' },
