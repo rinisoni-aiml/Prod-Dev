@@ -26,7 +26,7 @@ const OnboardingPage = () => {
 
   const industries = [
     { icon: Factory, name: 'FMCG', desc: 'Demand forecasting & inventory intelligence', live: true },
-    { icon: GraduationCap, name: 'Education', desc: 'Student analytics & retention', live: false },
+    { icon: GraduationCap, name: 'Education', desc: 'Student analytics & retention', live: true },
     { icon: Activity, name: 'Healthcare', desc: 'Patient risk & ops analysis', live: false },
     { icon: Building2, name: 'Real Estate', desc: 'Lead scoring & deal intelligence', live: false },
     { icon: Truck, name: 'Logistics', desc: 'Delivery & efficiency insights', live: true },

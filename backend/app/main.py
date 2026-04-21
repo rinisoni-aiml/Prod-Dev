@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 from app.routers import auth
 
 # ── FMCG routers ─────────────────────────────────────────────────────────────
-# All FMCG routes are prefixed /api/fmcg/<resource>
 from app.routers.fmcg import dashboard as fmcg_dashboard
 from app.routers.fmcg import inventory as fmcg_inventory
 from app.routers.fmcg import alerts as fmcg_alerts
@@ -19,30 +18,42 @@ from app.routers.fmcg import forecasting as fmcg_forecasting
 from app.routers.fmcg import ai as fmcg_ai
 from app.routers.fmcg import data as fmcg_data
 
-# ── Logistics routers ────────────────────────────────────────────────────────
+# ── Logistics routers ─────────────────────────────────────────────────────────
 from app.industries.logistics.routers import data as logistics_data
 from app.industries.logistics.routers import views as logistics_views
 from app.industries.logistics.routers import upload as logistics_upload
 from app.industries.logistics.routers import chat as logistics_chat
 from app.industries.logistics.routers import api as logistics_api
 
+# ── Education routers ─────────────────────────────────────────────────────────
+from app.routers.education import ai as edu_ai
+from app.routers.education import analytics as edu_analytics
+from app.routers.education import dashboard as edu_dashboard
+from app.routers.education import education_data as edu_data
+from app.routers.education import stats as edu_stats
+
 app = FastAPI(
     title="PulseIQ API",
     version="1.0.0",
     description="Multi-industry intelligence platform API — FMCG, Healthcare, Logistics and more.",
+    redirect_slashes=False,
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-origins = [settings.frontend_url, "http://localhost:5173", "http://localhost:8080"]
-if settings.environment == "production":
-    origins.append("https://*.vercel.app")
+origins = [
+    settings.frontend_url,     # your deployed frontend (must be exact)
+    "http://localhost:5173",   # Vite
+    "http://localhost:8080",   # Vue/other
+    "http://localhost:8081",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=origins,                        
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=True,                       
+    allow_methods=["*"],                          
+    allow_headers=["*"],                          
 )
 
 # ── Shared routes ─────────────────────────────────────────────────────────────
@@ -64,6 +75,13 @@ app.include_router(logistics_upload.router, prefix="/api/logistics/v1/upload", t
 app.include_router(logistics_chat.router,   prefix="/api/logistics/v1/ai",     tags=["Logistics - AI Chat"])
 app.include_router(logistics_api.router,    prefix="/api/logistics/v1",        tags=["Logistics - API"])
 
+# ── Education routes ──────────────────────────────────────────────────────────
+app.include_router(edu_dashboard.router, prefix="/api/education/dashboard", tags=["Education - Dashboard"])
+app.include_router(edu_ai.router,        prefix="/api/education/ai",        tags=["Education - AI"])
+app.include_router(edu_analytics.router, prefix="/api/education/analytics", tags=["Education - Analytics"])
+app.include_router(edu_data.router,      prefix="/api/education/data",      tags=["Education - Data"])
+app.include_router(edu_stats.router,     prefix="/api/education/stats",     tags=["Education - Stats"])
+
 
 @app.get("/")
 def root():
@@ -74,6 +92,7 @@ def root():
 def health():
     return {"status": "healthy"}
 
-
+for route in app.routes:
+    print(route.path)
 # Vercel serverless entry point
 handler = app
