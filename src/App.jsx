@@ -17,22 +17,34 @@ import AppLayout from "./components/layout/AppLayout";
 import NotFound from "./pages/NotFound";
 
 // ── Industry routes ───────────────────────────────────────────────────────────
-// Each industry exports fmcgDashboardRoutes (or equivalent) — an array of
-// { path, element } objects that are mounted inside the /dashboard shell.
-// To add a new industry: import its routes here and spread into the router below.
 import { fmcgDashboardRoutes } from './industries/fmcg/routes';
 import { logisticsDashboardRoutes } from './industries/logistics/routes';
+import { educationDashboardRoutes } from './industries/education/routes';
 import DashboardPage from './industries/fmcg/pages/DashboardPage';
 import { LogisticsAppProvider } from './industries/logistics/context/LogisticsAppContext';
 
 const queryClient = new QueryClient();
 
-// Routes logistics users away from the FMCG index to their own home
+// Routes users away from the FMCG index to their own industry home
 const IndustryHome = () => {
-  const { profile } = useAuthStore();
-  if (profile?.industry === 'logistics') {
+  const { profile, isLoading } = useAuthStore();
+
+  // Wait for profile to load before redirecting
+  if (isLoading || !profile) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
+  if (profile.industry === 'logistics') {
     return <Navigate to="/dashboard/logistics" replace />;
   }
+  if (profile.industry === 'education') {
+    return <Navigate to="/dashboard/education" replace />;
+  }
+
   return <DashboardPage />;
 };
 
@@ -69,7 +81,6 @@ const AuthInitializer = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         setUser(session.user);
-        // After email confirmation, redirect to onboarding or dashboard
         if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
           fetchProfile(session.user.id).then((profile) => {
             const publicPaths = ['/', '/login', '/signup'];
@@ -114,7 +125,7 @@ const App = () => (
       <BrowserRouter>
         <AuthInitializer>
           <Routes>
-            {/* ── Public pages ───────────────────────────────────────────── */}
+            {/* ── Public pages ─────────────────────────────────────────── */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
@@ -122,20 +133,29 @@ const App = () => (
               <ProtectedRoute><OnboardingPage /></ProtectedRoute>
             } />
 
-            {/* ── Dashboard shell — industry pages render as children ─────── */}
+            {/* ── Dashboard shell ───────────────────────────────────────── */}
             <Route path="/dashboard" element={
               <ProtectedRoute><LogisticsAppProvider><AppLayout /></LogisticsAppProvider></ProtectedRoute>
             }>
               <Route index element={<IndustryHome />} />
+
+              {/* FMCG routes */}
               {fmcgDashboardRoutes.filter(r => !r.index).map((route, i) =>
-                <Route key={i} path={route.path} element={route.element} />
+                <Route key={`fmcg-${i}`} path={route.path} element={route.element} />
               )}
+
+              {/* Logistics routes */}
               {logisticsDashboardRoutes.map((route, i) =>
                 <Route key={`logistics-${i}`} path={route.path} element={route.element} />
               )}
+
+              {/* Education routes */}
+              {educationDashboardRoutes.map((route, i) =>
+                <Route key={`education-${i}`} path={route.path} element={route.element} />
+              )}
             </Route>
 
-            {/* ── Shared authenticated pages ──────────────────────────────── */}
+            {/* ── Shared authenticated pages ────────────────────────────── */}
             <Route path="/profile" element={
               <ProtectedRoute><AppLayout /></ProtectedRoute>
             }>

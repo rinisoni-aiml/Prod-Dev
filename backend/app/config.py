@@ -1,22 +1,24 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    supabase_url: str
-    supabase_service_key: str
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
-    frontend_url: str = "http://localhost:5173"
+    database_url: str | None = None
+    secret_key: str | None = None
+    allowed_origins: str | None = None
+
+    supabase_url: str | None = None
+    supabase_service_key: str | None = None
+
+    frontend_url: str = "http://localhost:8080"
 
     groq_api_key: str | None = None
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
 
     environment: str = "development"
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
 
 
 @lru_cache()

@@ -44,7 +44,6 @@ export const dataApi = {
   upload: (formData) => api.post('/api/fmcg/data/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   getSources: () => api.get('/api/fmcg/data/sources'),
   deleteSource: (id) => api.delete(`/api/fmcg/data/sources/${id}`),
-  // Register bundled sample CSVs for the current user (idempotent)
   loadSampleData: () => api.post('/api/fmcg/data/load-sample'),
 };
 
@@ -53,8 +52,43 @@ export const logisticsDataApi = {
   upload: (formData) => api.post('/api/logistics/data/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   getSources: () => api.get('/api/logistics/data/sources'),
   deleteSource: (id) => api.delete(`/api/logistics/data/sources/${id}`),
-  // Register bundled sample logistics dataset for the current user (idempotent)
   loadSampleData: () => api.post('/api/logistics/v1/upload/sample'),
+};
+
+// ── Education: Data ───────────────────────────────────────────────────────────
+// ── Upload instance (bypasses async interceptor for multipart) ────────────────
+const uploadApi = axios.create({ baseURL: API_BASE });
+
+// ── Education: Data ───────────────────────────────────────────────────────────
+export const educationDataApi = {
+  upload: async (formData) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return uploadApi.post('/api/education/data/upload', formData, {
+      headers: {
+        // 'Content-Type': 'multipart/form-data',
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+      }
+    });
+  },
+};
+
+// ── Education: Dashboard ──────────────────────────────────────────────────────
+export const educationDashboardApi = {
+  getMainDashboard: () => api.get('/api/education/dashboard/generate_dashboard'),
+  getTablesCount: () => api.get('/api/education/stats/tables_count'),
+};
+
+// ── Education: Analytics ──────────────────────────────────────────────────────
+export const educationAnalyticsApi = {
+  getAcademic: () => api.get('/api/education/analytics/academic'),
+  getAdmissions: () => api.get('/api/education/analytics/admissions'),
+  getFaculty: () => api.get('/api/education/analytics/faculty'),
+  getPlacements: () => api.get('/api/education/analytics/placements'),
+};
+
+// ── Education: AI ─────────────────────────────────────────────────────────────
+export const educationAiApi = {
+  chat: (message) => api.get('/api/education/ai/ask', { params: { question: message } }),
 };
 
 // ── FMCG: Dashboard ───────────────────────────────────────────────────────────
@@ -63,21 +97,16 @@ export const dashboardApi = {
   getDemandTrend: (params) => api.get('/api/fmcg/dashboard/demand-trend', { params }),
   getTopSKUs: () => api.get('/api/fmcg/dashboard/top-skus'),
   getInventorySnapshot: () => api.get('/api/fmcg/dashboard/inventory-snapshot'),
-  // Check whether data files exist and whether analysis results are present
   getDataStatus: () => api.get('/api/fmcg/dashboard/data-status'),
-  // Run forecast + optimization on latest uploaded files (self-healing on first load)
   autoAnalyze: () => api.post('/api/fmcg/dashboard/auto-analyze'),
 };
 
 // ── FMCG: Forecasting ─────────────────────────────────────────────────────────
 export const forecastApi = {
-  // Run XGBoost forecast on an uploaded file (all SKUs or a specific one)
   runForecast: (fileId, horizon, sku = null) =>
     api.post('/api/fmcg/forecasting/run', { file_id: fileId, horizon, sku }),
-  // List SKUs available in an uploaded file (fast — no ML computation)
   getFileSKUs: (fileId) =>
     api.get('/api/fmcg/forecasting/file-skus', { params: { file_id: fileId } }),
-  // Legacy: forecast from demand_history table
   getForecast: (params) => api.get('/api/fmcg/forecasting', { params }),
   getSeasonality: () => api.get('/api/fmcg/forecasting/seasonality'),
   getProducts: () => api.get('/api/fmcg/forecasting/products'),
@@ -90,9 +119,7 @@ export const inventoryApi = {
   getWarehouseDetail: (id) => api.get(`/api/fmcg/inventory/warehouses/${id}`),
   getReorderQueue: () => api.get('/api/fmcg/inventory/reorder-queue'),
   getABCAnalysis: () => api.get('/api/fmcg/inventory/abc-analysis'),
-  // Run inventory optimization (Safety Stock, ROP, EOQ) from an uploaded file
   runOptimization: (body) => api.post('/api/fmcg/inventory/optimize', body),
-  // Fetch the latest stored optimization result (persisted across sessions)
   getLatestOptimization: () => api.get('/api/fmcg/inventory/latest-optimization'),
 };
 
