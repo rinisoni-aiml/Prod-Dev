@@ -35,3 +35,4 @@ tokenizers==0.19.1
 sentence-transformers==2.7.0
 faiss-cpu==1.13.0
 huggingface-hub==0.23.2
+email-validator==2.1.1
