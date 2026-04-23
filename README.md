@@ -1,4 +1,4 @@
-# PulseIQ - Supply Chain Management Platform
+# PulseIQ - Supply Chain Management Platform.
 
 A modern full-stack application for supply chain management and demand forecasting, built with React, FastAPI, and Supabase.
 
